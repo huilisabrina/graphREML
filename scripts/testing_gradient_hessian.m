@@ -32,12 +32,9 @@ for ii = 1:noBlocks
         length(representatives),ones(1,noPopns));
 end
 
-% Pnz is P with empty rows/columns removed
-Pnz = cellfun(@(p)p(any(p),any(p)),P,'uniformoutput',false);
-
 % simulation parameters
 h2true = 0.1;
-sampleSize = sum(blockSize) / 10; 
+sampleSize = sum(blockSize) / 20; 
 
 % True annotations: assign every other LD block to one annotation or the
 % other
@@ -54,7 +51,8 @@ heritability = [h2true 0];
     simulateSumstats(sampleSize, 'alleleFrequency', AF,...
     'precisionMatrices',P,...
     'annotations', annotations,...
-    'heritability',heritability);
+    'heritability',heritability,...
+    'missingness',0);
 
 % extract Z scores from sumstats tables
 Z = cellfun(@(s){s.Z_deriv_allele},sumstats);
@@ -94,26 +92,24 @@ disp([grad(1) (likelihood(2) - likelihood(1))/(grid(2)-grid(1))])
 % 2nd derivative should agree with difference b/t gradients
 disp([hess(1) (grad(2) - grad(1))/(grid(2)-grid(1))])
 
-% annotation matrix (for each cell) is has an all-ones column and a column
-% equal to the heterozygosity of each SNP
-annot = cellfun(@(h){[ones(size(h)) h]},heterozygosity);
+% use the "true" annotations multiplied by the heterozygosity
+annot = cellfun(@(a,j,b){[a(j,:) a(j,:).*b]},annotations, whichIndices, heterozygosity);
 
 % estimate heritability
 tic;
-[h2,steps] = h2newton(Z,Pnz,'nn',sampleSize,'annot',annot);
+[h2,steps] = h2newton(Z,P,'whichIndices',whichIndices,...
+    'nn',sampleSize,...
+    'annot',annot,...
+    'noSamples',0);
+
 time_h2newton = toc;
 
-% should be close to h2true
-disp(h2.h2(1))
+% first two heritability estimates should be around h2_true, 0
+disp([h2.h2(1:2)])
 
-% first entry should be small, indicating that model preferred
-% heterozygosity annotation instead of all-ones annotation
-disp(h2.params)
+beep
 
-% use the "true" annotations multiplied by the heterozygosity
-annot = cellfun(@(a,j,b){[a(j,:) a(j,:).*b]},annotations, whichIndices, heterozygosity);
-h2annot = h2newton(Z,Pnz,'nn',sampleSize,'annot',annot);
 
-disp(h2annot.h2(1:2))
+
 
 
