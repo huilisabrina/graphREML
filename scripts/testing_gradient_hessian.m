@@ -34,7 +34,7 @@ end
 
 % simulation parameters
 h2true = 0.1;
-sampleSize = sum(blockSize) / 20; 
+sampleSize = sum(blockSize) / 5; 
 
 % True annotations: assign every other LD block to one annotation or the
 % other
