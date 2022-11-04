@@ -1,30 +1,20 @@
 function [J] = GWASlikelihoodHessian(Z, sigmasq, P, nn, delSigmaDelA, whichSNPs, fixedIntercept)
-% GWASlikelihoodGradient computes the Hessian of the likelihood of the GWAS 
+% GWASlikelihoodHessian computes the Hessian of the likelihood of the GWAS 
 % sumstats alphaHat under a gaussian model:
-%                   beta ~ MVN(mu,diag(sigmasq))
-%                   alphaHat|beta ~ MVN(R*beta, R/nn)
+%                   beta ~ MVN(0,diag(sigmasq))
+%                   Z|beta ~ MVN(sqrt(n)*R*beta, R)
 %                   inv(R) = P.
 % 
-% The GWAS SNPs in alphahat should be a subset of those in P, and in the
+% The GWAS SNPs in Z should be a subset of those in P, and in the
 % same order; boolean vector whichSNPs should be true for rows/columns of P
-% corresponding to one of these SNPs, false elsewhere.
+% corresponding to one of these SNPs, false elsewhere (or, specify indices)
 %
-% sigmasq should be the same size as alphahat, such that missing
+% sigmasq should be the same size as Z, such that missing
 % SNPs are modeled as having zero effect-size variance.
 %
 % Argument delSigmaDelA is the gradient of sigmasq w.r.t. some parameters A.
-% GWASlikelihoodGradient computes the gradient of the likelihood w.r.t.
-% A, i.e.:
-% grad_A loglikelihood = delSigmaDelA * grad_sigmasq loglikelihood 
 %
-% Units of alphaHat should be either (1) normalized effect size estimates,
-% ie sample correlations, or (2) Z scores. In case (1), nn should be the
-% number of individuals in the GWAS. In case (2), nn should be 1, and the
-% vector of sigmasq values should be multiplied by nn.
-% Optionally, arguments alphaHat, sigmasq, P, whichSNPs can be specified as
-% cell arrays with one cell for each LD block.
-%
-% Optionally, arguments alphaHat, sigmasq, P, whichSNPs can be specified as
+% Optionally, arguments Z, sigmasq, P, whichSNPs can be specified as
 % cell arrays with one cell for each LD block.
 %
 % Optionally, if it is desired to specify the mean of beta, ie
@@ -40,6 +30,8 @@ function [J] = GWASlikelihoodHessian(Z, sigmasq, P, nn, delSigmaDelA, whichSNPs,
 
 if nargin < 7
     fixedIntercept = true;
+elseif ~fixedIntercept
+    error('Not yet supported')
 end
 
 if iscell(P) % handle cell-array-valued inputs
@@ -66,7 +58,7 @@ else
     M(whichSNPs) = sigmasq;
     M = P + nn * speye(mm).*M;
     
-    % betahat = P/P11 * alphaHat
+    % betahat = P/P11 * Z
     betahat = precisionMultiply(P, Z, whichSNPs);
     b = precisionDivide(M, betahat, whichSNPs);
     
