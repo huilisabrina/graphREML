@@ -56,7 +56,7 @@ end
 
 addRequired(p, 'alphahat', @(x)isvector(x) || iscell(x))
 addRequired(p, 'P', @(x)ismatrix(x) || iscell(x))
-addOptional(p, 'nn', 1, @isscalar)
+addOptional(p, 'sampleSize', 1, @isscalar)
 addOptional(p, 'whichIndices', cellfun(@(x){true(size(x))},Z), @(x)isvector(x) || iscell(x))
 addOptional(p, 'annot', cellfun(@(x){true(size(x))},Z), @(x)size(x,1)==mm || iscell(x))
 addOptional(p, 'linkFn', @(a,x)max(a*x,0), @(f)isa(f,'function_handle'))
@@ -68,6 +68,7 @@ addOptional(p, 'noSamples', 0, @(x)isscalar(x) & round(x)==x)
 addOptional(p, 'convergenceTol', 1e-6, @isscalar)
 addOptional(p, 'maxReps', 1e2, @isscalar)
 addOptional(p, 'minReps', 1, @isscalar)
+addOptional(p, 'stepSizeParam', 1e-3, @isscalar)
 
 parse(p, Z, P, varargin{:});
 
@@ -98,13 +99,13 @@ annotCat = vertcat(annot{:});
 if fixedIntercept
     objFn = @(params)-GWASlikelihood(Z,...
         cellfun(@(x){linkFn(x, params)}, annot),...
-        P, nn, whichIndices);
+        P, sampleSize, whichIndices);
     
 else
     objFn = @(params)-GWASlikelihood(Z,...
         cellfun(@(x){linkFn(x, params(1:end-1))}, annot),...
         P, 1/max(smallNumber, params(end)), whichIndices);
-    params(end+1) = 1/nn;
+    params(end+1) = 1/sampleSize;
 end
 
 newObjVal = objFn(params);
@@ -113,41 +114,52 @@ newObjVal = objFn(params);
 if noSamples > 0
     samples = arrayfun(@(m)randn(m,noSamples),blocksize,'UniformOutput',false);
     samples = cellfun(@(x)x./sqrt(sum(x.^2,2)),samples,'UniformOutput',false);
+else
+    samples = cell(noBlocks,1); % needed for parfor
 end
+
+% needed for parfor
+whichIndices = whichIndices; %#ok<*ASGSL> 
+linkFn = linkFn;
+linkFnGrad = linkFnGrad; %#ok<*NODEF> 
+sampleSize = sampleSize;
+fixedIntercept = fixedIntercept;
+noSamples = noSamples;
 
 allSteps=zeros(min(maxReps,1e6),noParams+1-fixedIntercept);
 allValues=zeros(min(maxReps,1e6),1);
 allGradients=allSteps;
 
+% main loop
 for rep=1:maxReps
     if printStuff
         disp(rep)
     end
     
-    % Compute gradient and hessian
+    % Compute gradient and hessian by summing over blocks
     gradient = 0;
     hessian = 0;
-    for block = 1:noBlocks
+    parfor block = 1:noBlocks
         sigmasq = linkFn(annot{block}, params(1:noParams));
         sigmasqGrad = linkFnGrad(annot{block}, params(1:noParams));
         
         hessian = hessian + ...
             GWASlikelihoodHessian(Z{block},sigmasq,P{block},...
-            nn, sigmasqGrad, whichIndices{block}, fixedIntercept)';
+            sampleSize, sigmasqGrad, whichIndices{block}, fixedIntercept)';
         
         if noSamples > 0
             gradient = gradient + ...
                 GWASlikelihoodGradientApproximate(Z{block},sigmasq,P{block},...
-                nn, sigmasqGrad, whichIndices{block}, samples{block})';
+                sampleSize, sigmasqGrad, whichIndices{block}, samples{block})';
         else
             gradient = gradient + ...
                 GWASlikelihoodGradient(Z{block},sigmasq,P{block},...
-                nn, sigmasqGrad, whichIndices{block},true)';
+                sampleSize, sigmasqGrad, whichIndices{block},true)';
         end
     end
     
     % Compute step
-    params = params - (hessian + eps * eye(noParams)) \ gradient;
+    params = params - (hessian + stepSizeParam * diag(diag(hessian)) + eps * eye(noParams)) \ gradient;
     
     % New objective function value
     newObjVal = objFn(params);
@@ -189,7 +201,7 @@ estimate.params = params(1:noParams)';
 estimate.h2 = h2Est;
 estimate.annotSum = annotSum;
 estimate.logLikelihood = -newObjVal;
-estimate.nn = nn;
+estimate.nn = sampleSize;
 
 % Enrichment only calculated if first annotation is all-ones vector
 if all(cellfun(@(a)all(a(:,1)==1),annot_unnormalized))
