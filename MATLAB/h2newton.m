@@ -59,8 +59,8 @@ addRequired(p, 'P', @(x)ismatrix(x) || iscell(x))
 addOptional(p, 'sampleSize', 1, @isscalar)
 addOptional(p, 'whichIndices', cellfun(@(x){true(size(x))},Z), @(x)isvector(x) || iscell(x))
 addOptional(p, 'annot', cellfun(@(x){true(size(x))},Z), @(x)size(x,1)==mm || iscell(x))
-addOptional(p, 'linkFn', @(a,x)max(a*x,0), @(f)isa(f,'function_handle'))
-addOptional(p, 'linkFnGrad', @(a,x)a.*(a*x>=0), @(f)isa(f,'function_handle'))
+addOptional(p, 'linkFn', @(x,w)max(x*w,0), @(f)isa(f,'function_handle'))
+addOptional(p, 'linkFnGrad', @(x,w)x.*(x*w>=0), @(f)isa(f,'function_handle'))
 addOptional(p, 'params', [], @isvector)
 addOptional(p, 'fixedIntercept', true, @isscalar)
 addOptional(p, 'printStuff', true, @isscalar)
@@ -88,9 +88,12 @@ annotSum = sum(vertcat(annotSum{:}));
 noBlocks = length(annot);
 if isempty(params)
     params = zeros(noAnnot,1);
+    if ~fixedIntercept
+        params(end+1) = 1/sampleSize;
+    end
 end
 smallNumber = 1e-12;
-noParams = length(params);
+noParams = length(params) - 1 + fixedIntercept;
 
 annot_unnormalized = annot;
 annot = cellfun(@(a){mm*a./max(1,annotSum)},annot);
@@ -105,7 +108,7 @@ else
     objFn = @(params)-GWASlikelihood(Z,...
         cellfun(@(x){linkFn(x, params(1:end-1))}, annot),...
         P, 1/max(smallNumber, params(end)), whichIndices);
-    params(end+1) = 1/sampleSize;
+    
 end
 
 newObjVal = objFn(params);
@@ -139,7 +142,7 @@ for rep=1:maxReps
     % Compute gradient and hessian by summing over blocks
     gradient = 0;
     hessian = 0;
-    parfor block = 1:noBlocks
+    for block = 1:noBlocks
         sigmasq = linkFn(annot{block}, params(1:noParams));
         sigmasqGrad = linkFnGrad(annot{block}, params(1:noParams));
         
@@ -154,12 +157,12 @@ for rep=1:maxReps
         else
             gradient = gradient + ...
                 GWASlikelihoodGradient(Z{block},sigmasq,P{block},...
-                sampleSize, sigmasqGrad, whichIndices{block},true)';
+                sampleSize, sigmasqGrad, whichIndices{block}, fixedIntercept)';
         end
     end
     
     % Compute step
-    params = params - (hessian + stepSizeParam * diag(diag(hessian)) + eps * eye(noParams)) \ gradient;
+    params = params - (hessian + stepSizeParam * diag(diag(hessian)) + 1e-12 * eye(length(params))) \ gradient;
     
     % New objective function value
     newObjVal = objFn(params);
@@ -197,11 +200,10 @@ for block=1:noBlocks
     h2Est = h2Est + sum(perSNPh2.*annot_unnormalized{block});
 end
 
-estimate.params = params(1:noParams)';
+estimate.params = params';
 estimate.h2 = h2Est;
 estimate.annotSum = annotSum;
 estimate.logLikelihood = -newObjVal;
-estimate.nn = sampleSize;
 
 % Enrichment only calculated if first annotation is all-ones vector
 if all(cellfun(@(a)all(a(:,1)==1),annot_unnormalized))
@@ -227,6 +229,15 @@ h2Var = dh2da' * (FI(1:noParams, 1:noParams) \ dh2da);
 estimate.paramsVar = pinv(FI);
 estimate.h2Var = h2Var;
 estimate.h2SE = sqrt(diag(h2Var))';
+
+if ~fixedIntercept
+    estimate.intercept = params(end) * sampleSize;
+    estimate.interceptSE = sqrt(estimate.paramsVar(end,end)) * sampleSize;
+else
+    estimate.intercept = 1;
+    estimate.interceptSE = 0;
+end
+
 % estimate.interceptSE = sqrt(estimate.paramsVar(end,end));
 % if all(cellfun(@(a)all(a(:,1)==1),annot_unnormalized))
 %     estimate.enrichmentZscore = (h2Est./annotSum - h2Est(1)/annotSum(1)) ./ ...

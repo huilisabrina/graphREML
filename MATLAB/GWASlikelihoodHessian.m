@@ -26,12 +26,10 @@ function [J] = GWASlikelihoodHessian(Z, sigmasq, P, nn, delSigmaDelA, whichSNPs,
 % fixedIntercept = true. This modifies the model as:
 % alphaHat|beta ~ MVN(R*beta, R * (1/nn + a))
 % where a==0, and it computes the derivative of the log-likelihood with 
-% respect to a; this will be the last element of grad.
+% respect to a; this will be the last element of J. 
 
 if nargin < 7
     fixedIntercept = true;
-elseif ~fixedIntercept
-    error('Not yet supported')
 end
 
 if iscell(P) % handle cell-array-valued inputs
@@ -60,11 +58,21 @@ else
     
     % betahat = P/P11 * Z
     betahat = precisionMultiply(P, Z, whichSNPs);
+
+    % M * betaHat
     b = precisionDivide(M, betahat, whichSNPs);
     
-    % approximate hessian
+    % derivative of M wrt parameters times b
     b_scaled = b .* delSigmaDelA;
+    
+    % derivative of M wrt intercept times b
+    if ~fixedIntercept
+        b_scaled(:, end+1) = precisionMultiply(P, b, whichSNPs);
+    end
+
+    % approximate Hessian
     J = -1/2 * nn^2 * b_scaled' * precisionDivide(M, b_scaled, whichSNPs);
+
    
 end
 end
