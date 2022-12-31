@@ -3,7 +3,7 @@ function [estimate, steps] = h2newton(Z,P,varargin)
 %   Required inputs:
 %   Z: Z scores, as a cell array with one cell per LD block.
 %   P: LD graphacal model as a cell array.
-% 
+%
 %   Optional inputs:
 %   nn: GWAS sample size
 %   whichIndices: which rows/cols in the LDGM have nonmissing summary statistics.
@@ -25,7 +25,7 @@ function [estimate, steps] = h2newton(Z,P,varargin)
 %   convergenceTol: when log-likelihood improves by less, declare convergence
 %   maxReps: maximum number of steps to perform
 %   minReps: starts checking for convergence after this number of steps
-% 
+%
 %   Output arguments:
 %   estimate: struct containing the following fields:
 %       params: estimated paramters
@@ -38,13 +38,13 @@ function [estimate, steps] = h2newton(Z,P,varargin)
 %       paramsVar: approx sampling covariance of the parameters
 %       h2Var: approx sampling covariance of the heritability
 %       h2SE: approx standard error of the heritability
-%   
+%
 %   steps: struct containing the following fields:
 %       reps: number of steps before stopping
 %       params: parameter values at each step
 %       obj: objective function value (-logLikelihood) at each step
 %       gradient: gradient of the objective function at each step
-% 
+%
 
 % initialize
 p=inputParser;
@@ -89,7 +89,7 @@ noBlocks = length(annot);
 if isempty(params)
     params = zeros(noAnnot,1);
     if ~fixedIntercept
-        params(end+1) = 1/sampleSize;
+        params(end+1,1) = 1;
     end
 end
 smallNumber = 1e-12;
@@ -102,14 +102,15 @@ annotCat = vertcat(annot{:});
 if fixedIntercept
     objFn = @(params)-GWASlikelihood(Z,...
         cellfun(@(x){linkFn(x, params)}, annot),...
-        P, sampleSize, whichIndices);
-    
+        P, sampleSize, whichIndices, 1);
+
 else
     objFn = @(params)-GWASlikelihood(Z,...
         cellfun(@(x){linkFn(x, params(1:end-1))}, annot),...
-        P, 1/max(smallNumber, params(end)), whichIndices);
-    
+        P, sampleSize, whichIndices, params(end));
+
 end
+intercept = 1;
 
 newObjVal = objFn(params);
 
@@ -122,9 +123,9 @@ else
 end
 
 % needed for parfor
-whichIndices = whichIndices; %#ok<*ASGSL> 
+whichIndices = whichIndices; %#ok<*ASGSL>
 linkFn = linkFn;
-linkFnGrad = linkFnGrad; %#ok<*NODEF> 
+linkFnGrad = linkFnGrad; %#ok<*NODEF>
 sampleSize = sampleSize;
 fixedIntercept = fixedIntercept;
 noSamples = noSamples;
@@ -138,18 +139,18 @@ for rep=1:maxReps
     if printStuff
         disp(rep)
     end
-    
+
     % Compute gradient and hessian by summing over blocks
     gradient = 0;
     hessian = 0;
-    for block = 1:noBlocks
+    parfor block = 1:noBlocks
         sigmasq = linkFn(annot{block}, params(1:noParams));
         sigmasqGrad = linkFnGrad(annot{block}, params(1:noParams));
-        
+
         hessian = hessian + ...
             GWASlikelihoodHessian(Z{block},sigmasq,P{block},...
-            sampleSize, sigmasqGrad, whichIndices{block}, fixedIntercept)';
-        
+            sampleSize, sigmasqGrad, whichIndices{block}, intercept, fixedIntercept)';
+
         if noSamples > 0
             gradient = gradient + ...
                 GWASlikelihoodGradientApproximate(Z{block},sigmasq,P{block},...
@@ -157,16 +158,20 @@ for rep=1:maxReps
         else
             gradient = gradient + ...
                 GWASlikelihoodGradient(Z{block},sigmasq,P{block},...
-                sampleSize, sigmasqGrad, whichIndices{block}, fixedIntercept)';
+                sampleSize, sigmasqGrad, whichIndices{block}, intercept, fixedIntercept)';
         end
     end
-    
+
     % Compute step
-    params = params - (hessian + stepSizeParam * diag(diag(hessian)) + 1e-12 * eye(length(params))) \ gradient;
-    
+    params = params - (hessian + stepSizeParam * diag(diag(hessian)) + 1e-9 * eye(length(params))) \ gradient;
+
     % New objective function value
     newObjVal = objFn(params);
     
+    if ~fixedIntercept
+        intercept = params(end);
+    end
+
     allValues(rep)=newObjVal;
     if nargout > 1
         allSteps(rep,:)=params;
@@ -181,7 +186,7 @@ for rep=1:maxReps
             break;
         end
     end
-    
+
     %     converged = (newObjVal-oldObjVal)/oldObjVal < convergenceTol;
 end
 
@@ -231,8 +236,8 @@ estimate.h2Var = h2Var;
 estimate.h2SE = sqrt(diag(h2Var))';
 
 if ~fixedIntercept
-    estimate.intercept = params(end) * sampleSize;
-    estimate.interceptSE = sqrt(estimate.paramsVar(end,end)) * sampleSize;
+    estimate.intercept = params(end);
+    estimate.interceptSE = sqrt(estimate.paramsVar(end,end));
 else
     estimate.intercept = 1;
     estimate.interceptSE = 0;
