@@ -1,4 +1,4 @@
-function [J] = GWASlikelihoodHessian(Z, sigmasq, P, nn, delSigmaDelA, whichSNPs, fixedIntercept)
+function [J] = GWASlikelihoodHessian(Z, sigmasq, P, nn, delSigmaDelA, whichSNPs, intercept, fixedIntercept)
 % GWASlikelihoodHessian computes the Hessian of the likelihood of the GWAS 
 % sumstats alphaHat under a gaussian model:
 %                   beta ~ MVN(0,diag(sigmasq))
@@ -29,6 +29,10 @@ function [J] = GWASlikelihoodHessian(Z, sigmasq, P, nn, delSigmaDelA, whichSNPs,
 % respect to a; this will be the last element of J. 
 
 if nargin < 7
+    intercept = 1;
+end
+assert(isscalar(intercept) && all(intercept>=0,'all'))
+if nargin < 8
     fixedIntercept = true;
 end
 
@@ -37,7 +41,7 @@ if iscell(P) % handle cell-array-valued inputs
         whichSNPs = cellfun(@(x)true(size(x),Z),'UniformOutput', false);
     end
     assert(iscell(Z) & iscell(whichSNPs) & iscell(sigmasq))
-    J = cellfun(@(a,s,p,dS,w)GWASlikelihoodHessian(a,s,p,nn,dS,w,fixedIntercept),...
+    J = cellfun(@(a,s,p,dS,w)GWASlikelihoodHessian(a,s,p,nn,dS,w,intercept,fixedIntercept),...
         Z,sigmasq,P,delSigmaDelA,whichSNPs, 'UniformOutput', false);
 else
     
@@ -51,19 +55,18 @@ else
     P = P(pnz,pnz);
     whichSNPs = whichSNPs(pnz);
     
-    % M = nn*Sigma + P is the covariance matrix of P*z
-    M = zeros(mm,1);
-    M(whichSNPs) = sigmasq;
-    M = P + nn * speye(mm).*M;
+    % M == E(xx')
+    M = sparse(find(whichSNPs), find(whichSNPs), nn*sigmasq, mm, mm);
+    M = M + intercept * P;
     
     % betahat = P/P11 * Z
-    betahat = precisionMultiply(P, Z, whichSNPs);
+    x = precisionMultiply(P, Z, whichSNPs);
 
     % M * betaHat
-    b = precisionDivide(M, betahat, whichSNPs);
+    b = precisionDivide(M, x, whichSNPs);
     
     % derivative of M wrt parameters times b
-    b_scaled = b .* delSigmaDelA;
+    b_scaled = nn * b .* delSigmaDelA;
     
     % derivative of M wrt intercept times b
     if ~fixedIntercept
@@ -71,7 +74,7 @@ else
     end
 
     % approximate Hessian
-    J = -1/2 * nn^2 * b_scaled' * precisionDivide(M, b_scaled, whichSNPs);
+    J = -1/2 * b_scaled' * precisionDivide(M, b_scaled, whichSNPs);
 
    
 end
