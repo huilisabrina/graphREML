@@ -65,7 +65,7 @@ addOptional(p, 'params', [], @isvector)
 addOptional(p, 'fixedIntercept', true, @isscalar)
 addOptional(p, 'printStuff', true, @isscalar)
 addOptional(p, 'noSamples', 0, @(x)isscalar(x) & round(x)==x)
-addOptional(p, 'convergenceTol', 1e-6, @isscalar)
+addOptional(p, 'convergenceTol', 1e-1, @isscalar)
 addOptional(p, 'maxReps', 1e2, @isscalar)
 addOptional(p, 'minReps', 1, @isscalar)
 addOptional(p, 'stepSizeParam', 1e-3, @isscalar)
@@ -92,12 +92,12 @@ if isempty(params)
         params(end+1,1) = 1;
     end
 end
-smallNumber = 1e-12;
+smallNumber = 1e-6;
 noParams = length(params) - 1 + fixedIntercept;
 
 annot_unnormalized = annot;
-annot = cellfun(@(a){mm*a./max(1,annotSum)},annot);
-annotCat = vertcat(annot{:});
+annot = annot;
+% annot = cellfun(@(a){mm*a./max(1,annotSum)},annot);
 
 if fixedIntercept
     objFn = @(params)-GWASlikelihood(Z,...
@@ -163,7 +163,8 @@ for rep=1:maxReps
     end
 
     % Compute step
-    params = params - (hessian + stepSizeParam * diag(diag(hessian)) + 1e-9 * eye(length(params))) \ gradient;
+    params = params - (hessian + stepSizeParam * diag(diag(hessian)) + ...
+        smallNumber * eye(length(params))) \ gradient;
 
     % New objective function value
     newObjVal = objFn(params);
