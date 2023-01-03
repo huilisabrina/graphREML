@@ -1,5 +1,9 @@
 # MATLAB 
 *.asv
+*.DS_Store
+
+# mexfiles
+*.mexmaca64
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
