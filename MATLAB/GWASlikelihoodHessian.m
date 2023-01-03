@@ -75,7 +75,12 @@ else
 
     % approximate Hessian
     J = -1/2 * b_scaled' * precisionDivide(M, b_scaled, whichSNPs);
-
+    
+    % missing SNPs extra term
+    if ~fixedIntercept
+        mm0 = sum(~whichSNPs);
+        J(end,end) = J(end,end) - 1/2 * mm0 * -1/intercept^2;
+    end
    
 end
 end
