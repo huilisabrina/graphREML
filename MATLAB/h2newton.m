@@ -67,8 +67,9 @@ addOptional(p, 'printStuff', true, @isscalar)
 addOptional(p, 'noSamples', 0, @(x)isscalar(x) & round(x)==x)
 addOptional(p, 'convergenceTol', 1e-1, @isscalar)
 addOptional(p, 'maxReps', 1e2, @isscalar)
-addOptional(p, 'minReps', 1, @isscalar)
+addOptional(p, 'minReps', 3, @isscalar)
 addOptional(p, 'stepSizeParam', 1e-3, @isscalar)
+
 
 parse(p, Z, P, varargin{:});
 
@@ -163,32 +164,36 @@ for rep=1:maxReps
     end
 
     % Compute step
+    oldParams = params;
     params = params - (hessian + stepSizeParam * diag(diag(hessian)) + ...
-        smallNumber * eye(length(params))) \ gradient;
+        1e-2 * stepSizeParam * mean(diag(hessian)) * eye(size(hessian))) \ gradient;
 
     % New objective function value
     newObjVal = objFn(params);
     
+    if rep > 1
+        while allValues(rep-1) - newObjVal < -smallNumber
+            stepSizeParam = 2*stepSizeParam;
+            warning('Objective function increased at iteration %d; increasing stepSizeParam to %.2f', rep, stepSizeParam)
+            params = params - (hessian + stepSizeParam * diag(diag(hessian)) + ...
+                1e-2 * stepSizeParam * mean(diag(hessian)) * eye(size(hessian))) \ gradient;
+            newObjVal = objFn(params);
+        end
+    end
+
     if ~fixedIntercept
         intercept = params(end);
     end
 
     allValues(rep)=newObjVal;
-    if nargout > 1
-        allSteps(rep,:)=params;
-        %         allStepSizes(rep,:) = stepSizeVector;
-    end
-    if rep > 1
-        if allValues(rep-1) - newObjVal < 0
-            warning('Objective function increased at the last iteration')
-            break;
-        end
-        if allValues(rep-1) - newObjVal < convergenceTol
+    allSteps(rep,:)=params;
+
+    if rep > minReps
+        if allValues(rep-minReps) - newObjVal < minReps * convergenceTol
             break;
         end
     end
 
-    %     converged = (newObjVal-oldObjVal)/oldObjVal < convergenceTol;
 end
 
 % Convergence report
