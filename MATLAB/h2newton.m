@@ -169,7 +169,7 @@ for rep=1:maxReps
 
     % New objective function value
     newObjVal = objFn(params);
-    
+
     if rep > 1
         while allValues(rep-1) - newObjVal < -smallNumber
             trustRegionSizeParam = 2*trustRegionSizeParam;
@@ -228,17 +228,26 @@ if any(diag(FI)==0)
     warning('Some parameters have zero fisher information. Regularizing FI matrix to obtain standard errors.')
     FI = FI + smallNumber*eye(size(FI));
 end
+params_inv = pinv(FI);
+
+% Turn annotation and coefficients to genetic variances
+annot_mat = vertcat(annot{:});
+link_val = linkFn(annot_mat, params(1:noParams));
+link_jacob = linkFnGrad(annot_mat, params(1:noParams));
+G = sum(link_val);
+J = sum(link_jacob, 1);
 
 % Variance of h2 estimates via chain rule
-dh2da = 0;
-for block=1:noBlocks
-    dh2da = dh2da + linkFnGrad(annot{block}, params(1:noParams))'*annot_unnormalized{block};
-end
-h2Var = dh2da' * (FI(1:noParams, 1:noParams) \ dh2da);
+dMdtau = 1/(G^2)*(G*link_jacob - kron(link_val, J));
+dMdtau_A = transpose(dMdtau) * annot_mat;
+p_annot = mean(annot_mat, 1)';
+SE_h2 = sqrt(diag(transpose(dMdtau_A)*(params_inv*dMdtau_A)));
+enrich_SE = SE_h2(1:noParams) ./ p_annot(1:noParams);
+enrich_SE(1) = sqrt(J*(params_inv*transpose(J)));
 
-estimate.paramsVar = pinv(FI);
-estimate.h2Var = h2Var;
-estimate.h2SE = sqrt(diag(h2Var))';
+% Record variance and SE
+estimate.paramVar = params_inv;
+estimate.SE = enrich_SE';
 
 if ~fixedIntercept
     estimate.intercept = params(end);
@@ -254,7 +263,6 @@ end
 %         sqrt(diag(h2Var)'./annotSum.^2 + h2Var(1)./annotSum(1).^2 - 2*h2Var(1,:)/annotSum(1)./annotSum);
 %     estimate.enrichmentZscore(1) = 0;
 % end
-
 
 end
 
