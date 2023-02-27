@@ -26,6 +26,16 @@ function [estimate, steps] = h2newton(Z,P,varargin)
 %   maxReps: maximum number of steps to perform
 %   minReps: starts checking for convergence after this number of steps
 %   trustRegionSizeParam: hyperparameter used to tune the step size
+%   maxiter: maximum number of attempts to adjust step size
+%   trustRegionRhoLB: lower bound of the ratio of the actual and predicted 
+%   change of likelihood, i.e., a ratio lower than this threshold will lead
+%   to shrinkage of the trust region
+%   trustRegionRhoUB: upper bound of the ratio of the actual and predicted 
+%   change of likelihood, i.e., a ratio higher than this threshold will lead
+%   to expansion of the trust region
+%   trustRegionScalar: scaling factor for adjusting (shrink or expand) the 
+%   step size
+%   deltaGradCheck: whether to check the norm of gradient from iter to iter
 %   useTR: whether to use the trust-region algorithm to adjust for the step
 %   size
 %
@@ -39,8 +49,9 @@ function [estimate, steps] = h2newton(Z,P,varargin)
 %       logLikelihood: likelihood of sumstats at optimum
 %       nn: sample size or 1/intercept if intercept was learned
 %       paramsVar: approx sampling covariance of the parameters
-%       h2Var: approx sampling covariance of the heritability
-%       h2SE: approx standard error of the heritability
+%       SE: standard error of total h2 and *enrichment*
+%       intercept: estimate of the intercept
+%       interceptSE: standard error of the intercept
 %
 %   steps: struct containing the following fields:
 %       reps: number of steps before stopping
@@ -72,6 +83,11 @@ addOptional(p, 'convergenceTol', 1e-1, @isscalar)
 addOptional(p, 'maxReps', 1e2, @isscalar)
 addOptional(p, 'minReps', 3, @isscalar)
 addOptional(p, 'trustRegionSizeParam', 1e-3, @isscalar)
+addOptional(p, 'maxiter', 20, @isscalar)
+addOptional(p, 'trustRegionRhoLB', 1e-4, @isscalar)
+addOptional(p, 'trustRegionRhoUB', 0.99, @isscalar)
+addOptional(p, 'trustRegionScalar', 10, @isscalar)
+addOptional(p, 'deltaGradCheck', false, @isscalar)
 addOptional(p, 'useTR', true, @isscalar)
 
 parse(p, Z, P, varargin{:});
@@ -186,11 +202,10 @@ for rep=1:maxReps
     else
         % initialize fixed values for step size tuning; set hyperparameters
         oldParams = params;
-        trustRegion_lam = trustRegionSizeParam;
+        trustRegionLam = trustRegionSizeParam;
         no_update = true; 
-        maxiter = 5; iter = 0;
+        iter = 0;
         rho_arr = [];
-        eta1 = 0.0001; eta2 = 0.99; 
 
         % define predicted change of likelihood
         delta_pred_ll = @(x)transpose(x)*gradient - 0.5*transpose(x)*(hessian*x);
@@ -198,56 +213,64 @@ for rep=1:maxReps
         while no_update && iter < maxiter
             iter = iter + 1;
         
-            % propose a new step (at the current value of trustRegion_lam)
-            hess_mod = hessian + trustRegion_lam*diag(diag(hessian));
+            % propose a new step (at the current value of trustRegionLam)
+            hess_mod = hessian + trustRegionLam*diag(diag(hessian));
 
             % to prevent NaN step size, add scaled diag matrix to hess
             if rcond(hess_mod) < 1e-30 % prevent NaN step size
-                hess_mod = hess_mod + 1e-2 * trustRegionSizeParam * mean(diag(hessian)) * eye(size(hessian));
+                hess_mod = hess_mod + 1e-2 * trustRegionSizeParam *...
+                    mean(diag(hessian)) * eye(size(hessian));
             end
 
             stepSize = hess_mod \ gradient;
             disp('Newly proposed step size:')
             disp(stepSize(1:3)')
 
-            % Assess the proposed step -- eval likelihood and gradient at
-            % the new parameter estimate
+            % Assess the proposed step -- eval likelihood (and gradient if 
+            % specified) at the new values of parameter
             params_propose = oldParams - stepSize;
             newObjVal_propose = objFn(params_propose);
-            gradient_propose = 0;
+            
+            if deltaGradCheck
+                gradient_propose = 0;
+                parfor block = 1:noBlocks
+                    sigmasq = linkFn(annot{block}, params_propose(1:noParams));
+                    sigmasqGrad = linkFnGrad(annot{block}, params_propose(1:noParams));
 
-            parfor block = 1:noBlocks
-                sigmasq = linkFn(annot{block}, params_propose(1:noParams));
-                sigmasqGrad = linkFnGrad(annot{block}, params_propose(1:noParams));
-
-                if noSamples > 0
-                    gradient_propose = gradient_propose + ...
-                        GWASlikelihoodGradientApproximate(Z{block},sigmasq,P{block},...
-                        sampleSize, sigmasqGrad, whichIndices{block}, samples{block})';
-                else
-                    gradient_propose = gradient_propose + ...
-                        GWASlikelihoodGradient(Z{block},sigmasq,P{block},...
-                        sampleSize, sigmasqGrad, whichIndices{block}, intercept, fixedIntercept)';
+                    if noSamples > 0
+                        gradient_propose = gradient_propose + ...
+                            GWASlikelihoodGradientApproximate(Z{block},sigmasq,P{block},...
+                            sampleSize, sigmasqGrad, whichIndices{block}, samples{block})';
+                    else
+                        gradient_propose = gradient_propose + ...
+                            GWASlikelihoodGradient(Z{block},sigmasq,P{block},...
+                            sampleSize, sigmasqGrad, whichIndices{block}, ...
+                            intercept, fixedIntercept)';
+                    end
                 end
             end
-            
+
             % Evaluate the proposed step size
             delta_actual = newObjVal_propose - newObjVal;
             delta_pred = delta_pred_ll(stepSize);
         
             % Assess the quality of the step
-            if norm(gradient_propose) > (2*norm(gradient))
-                disp('Gradient changes too much. Reject step size.')
-                rho = -1;
-            elseif delta_actual > 0
+            if delta_actual > 0
                 disp('Neg-logL increased. Reject step size.')
                 rho = -1;
+            elseif deltaGradCheck
+                if norm(gradient_propose) > (2*norm(gradient))
+                    disp('Gradient changes too much. Reject step size.')
+                    rho = -1;
+                else
+                    rho = abs(delta_actual / delta_pred);
+                end
             else
                 rho = abs(delta_actual / delta_pred);
             end
-        
+
             % Accept or reject the update
-            if rho > eta1
+            if rho > trustRegionRhoLB
                 disp('Accepted step size')
                 no_update = false; % stops the search of step size
 
@@ -255,38 +278,33 @@ for rep=1:maxReps
                 params = params_propose;
             end
         
-            % Update the trust region penalty (requires hyperparameters)
-            if rho < eta1
+            % Update the trust region penalty
+            if rho < trustRegionRhoLB
                 disp(['Shrink the trust region / ' ...
                     'Increase the step size penalty term.'])
-                trustRegion_lam = trustRegion_lam*2;
-            elseif rho > eta2
+                trustRegionLam = trustRegionLam * trustRegionScalar;
+            elseif rho > trustRegionRhoUB
                 disp(['Expand the trust region / ' ...
                     'Reduce the step size penalty term.'])
-                trustRegion_lam = trustRegion_lam/2;        
+                trustRegionLam = trustRegionLam / trustRegionScalar;        
             end
             rho_arr(end+1) = rho;
         end
-        disp('Trace of the rho values:')
+
+        disp('History of the rho values:')
         disp(rho_arr)
 
         % If adjustment is not successful, simply 
         % remove the gradient check and move on
         if iter == maxiter
             % give warnings of the updating
-            if norm(gradient_propose) > (2*norm(gradient))
-                warning(['After attempts to adjust step size, ' ...
+            warning(['After attempts to adjust step size, ' ...
                     'gradient still changes too much'])
-            elseif delta_actual > 0
-                warning(['After attempts to adjust step size, ' ...
-                    'neg-logL still increases'])
-            end
             warning('Ignore the gradient check and move on')
-
             rho = abs(delta_actual / delta_pred);
         
             % Accept the change unless the ratio is too small
-            if rho > eta1
+            if rho > trustRegionRhoLB
                 disp('Accepted step size')
                 no_update = false;
                 newObjVal = objFn(params_propose);
@@ -297,7 +315,6 @@ for rep=1:maxReps
         else
             disp('Updated parameter values:')
             disp(params(1:5)')
-        end
     end
 
     if ~fixedIntercept
@@ -341,7 +358,7 @@ if all(cellfun(@(a)all(a(:,1)==1),annot_unnormalized))
 end
 
 %% Compute covariance of the parameter estimates
-% Approximate fisher information (actually average information)
+% Approximate fisher information (AI)
 FI = -hessian;
 
 if any(diag(FI)==0)
