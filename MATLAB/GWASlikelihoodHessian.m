@@ -62,7 +62,7 @@ else
     % betahat = P/P11 * Z
     x = precisionMultiply(P, Z, whichSNPs);
 
-    % M * betaHat
+    % b = M\x
     b = precisionDivide(M, x, whichSNPs);
     
     % derivative of M wrt parameters times b
