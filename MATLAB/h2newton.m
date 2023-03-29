@@ -332,7 +332,7 @@ end
 
 %% Post-maximization computation
 % Compute block-specific gradient (once at the estimate)
-grad_blocks = zeros(noBlocks, noParams);
+grad_blocks = zeros(noBlocks, noParams + 0^fixedIntercept);
 
 for block = 1:noBlocks
     sigmasq = linkFn(annot{block}, params(1:noParams));
@@ -400,6 +400,8 @@ dMdtau_A = transpose(dMdtau) * annot_mat;
 p_annot = mean(annot_mat, 1)';
 
 % naive SE estimator
+disp(size(dMdtau_A))
+disp(size(params_inv))
 SE_prop_h2 = sqrt(diag(transpose(dMdtau_A)*(params_inv*dMdtau_A)));
 enrich_SE = SE_prop_h2(1:noParams) ./ p_annot(1:noParams);
 enrich_SE(1) = sqrt(J*(params_inv*transpose(J)));
@@ -413,10 +415,19 @@ enrich_sandSE(1) = sqrt(J*(sandVar*transpose(J)));
 dMdtau_J = transpose(link_jacob) * annot_mat;
 
 % naive SE estimator
-SE_h2 = sqrt(diag(transpose(dMdtau_J)*(params_inv*dMdtau_J)));
+naive_cov = transpose(dMdtau_J)*(params_inv*dMdtau_J);
+SE_h2 = sqrt(diag(naive_cov));
 
 % robust / Huber-White estimator
-sandSE_h2 = sqrt(diag(transpose(dMdtau_J)*(sandVar*dMdtau_J)));
+sand_cov = transpose(dMdtau_J)*(sandVar*dMdtau_J);
+sandSE_h2 = sqrt(diag(sand_cov));
+
+%% Compute p-values for enrichment (defined as difference)
+% based on naive SE
+naive_pval = enrichment_pval(estimate.h2, SE_h2, naive_cov, p_annot');
+
+% based on robust SE
+sand_pval = enrichment_pval(estimate.h2, sandSE_h2, sand_cov, p_annot');
 
 %% Record variance and SE (both naive and model-based)
 estimate.paramVar = params_inv;
@@ -425,6 +436,8 @@ estimate.SE = enrich_SE';
 estimate.sandSE = enrich_sandSE';
 estimate.h2SE = SE_h2';
 estimate.h2sandSE = sandSE_h2';
+estimate.enrichPval = naive_pval;
+estimate.enrichsandPval = sand_pval;
 
 if ~fixedIntercept
     estimate.intercept = params(end);
