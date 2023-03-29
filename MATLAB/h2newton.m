@@ -154,7 +154,7 @@ allSteps=zeros(min(maxReps,1e6),noParams+1-fixedIntercept);
 allValues=zeros(min(maxReps,1e6),1);
 allGradients=allSteps;
 
-% main loop
+% main loop for updating parameter values
 for rep=1:maxReps
     if printStuff
         disp(rep)
@@ -163,6 +163,7 @@ for rep=1:maxReps
     % Compute gradient and hessian by summing over blocks
     gradient = 0;
     hessian = 0;
+
     parfor block = 1:noBlocks
         sigmasq = linkFn(annot{block}, params(1:noParams));
         sigmasqGrad = linkFnGrad(annot{block}, params(1:noParams));
@@ -172,12 +173,10 @@ for rep=1:maxReps
             sampleSize, sigmasqGrad, whichIndices{block}, intercept, fixedIntercept)';
 
         if noSamples > 0
-            gradient = gradient + ...
-                GWASlikelihoodGradientApproximate(Z{block},sigmasq,P{block},...
+            gradient = gradient + GWASlikelihoodGradientApproximate(Z{block},sigmasq,P{block},...
                 sampleSize, sigmasqGrad, whichIndices{block}, samples{block})';
         else
-            gradient = gradient + ...
-                GWASlikelihoodGradient(Z{block},sigmasq,P{block},...
+            gradient = gradient + GWASlikelihoodGradient(Z{block},sigmasq,P{block},...
                 sampleSize, sigmasqGrad, whichIndices{block}, intercept, fixedIntercept)';
         end
     end
@@ -190,7 +189,7 @@ for rep=1:maxReps
         % New objective function value
         newObjVal = objFn(params);
     
-        if rep > 1
+        if rep > 1 % update using heuristics
             while allValues(rep-1) - newObjVal < -smallNumber
                 trustRegionSizeParam = 2*trustRegionSizeParam;
                 warning('Objective function increased at iteration %d; increasing stepSizeParam to %.2f', rep, trustRegionSizeParam)
@@ -200,7 +199,7 @@ for rep=1:maxReps
             end
         end
     else
-        % initialize fixed values for step size tuning; set hyperparameters
+        % initialize some fixed values for step size tuning;
         oldParams = params;
         trustRegionLam = trustRegionSizeParam;
         no_update = true; 
@@ -217,14 +216,13 @@ for rep=1:maxReps
             hess_mod = hessian + trustRegionLam*diag(diag(hessian));
 
             % to prevent NaN step size, add scaled diag matrix to hess
-            if rcond(hess_mod) < 1e-30 % prevent NaN step size
+            if rcond(hess_mod) < 1e-30
                 hess_mod = hess_mod + 1e-2 * trustRegionSizeParam *...
                     mean(diag(hessian)) * eye(size(hessian));
             end
 
             stepSize = hess_mod \ gradient;
             disp('Newly proposed step size:')
-            disp(stepSize(1:3)')
 
             % Assess the proposed step -- eval likelihood (and gradient if 
             % specified) at the new values of parameter
@@ -315,21 +313,38 @@ for rep=1:maxReps
         else
             disp('Updated parameter values:')
             disp(params(1:5)')
-    end
+        end
 
-    if ~fixedIntercept
-        intercept = params(end);
-    end
-
-    allValues(rep)=newObjVal;
-    allSteps(rep,:)=params;
-
-    if rep > minReps
-        if allValues(rep-minReps) - newObjVal < minReps * convergenceTol
-            break;
+        if ~fixedIntercept
+            intercept = params(end);
+        end
+    
+        allValues(rep)=newObjVal;
+        allSteps(rep,:)=params;
+    
+        if rep > minReps
+            if allValues(rep-minReps) - newObjVal < minReps * convergenceTol
+                break;
+            end
         end
     end
+end
 
+%% Post-maximization computation
+% Compute block-specific gradient (once at the estimate)
+grad_blocks = zeros(noBlocks, noParams);
+
+for block = 1:noBlocks
+    sigmasq = linkFn(annot{block}, params(1:noParams));
+    sigmasqGrad = linkFnGrad(annot{block}, params(1:noParams));
+
+    if noSamples > 0
+        grad_blocks(block,:) = GWASlikelihoodGradientApproximate(Z{block},sigmasq,P{block},...
+            sampleSize, sigmasqGrad, whichIndices{block}, samples{block})';
+    else
+        grad_blocks(block,:) = GWASlikelihoodGradient(Z{block},sigmasq,P{block},...
+            sampleSize, sigmasqGrad, whichIndices{block}, intercept, fixedIntercept)';
+    end
 end
 
 % Convergence report
@@ -362,10 +377,15 @@ end
 FI = -hessian;
 
 if any(diag(FI)==0)
-    warning('Some parameters have zero fisher information. Regularizing FI matrix to obtain standard errors.')
+    warning(['Some parameters have zero fisher information. ' ...
+        'Regularizing FI matrix to obtain standard errors.'])
     FI = FI + smallNumber*eye(size(FI));
 end
 params_inv = pinv(FI);
+
+% Approximate empirical covariance of the score (using the block-wise estimates)
+empVarApprox = cov(grad_blocks) * noBlocks;
+sandVar = params_inv*(empVarApprox*params_inv);
 
 % Turn annotation and coefficients to genetic variances
 annot_mat = vertcat(annot{:});
@@ -374,32 +394,46 @@ link_jacob = linkFnGrad(annot_mat, params(1:noParams));
 G = sum(link_val);
 J = sum(link_jacob, 1);
 
-% Variance of h2 estimates via chain rule
+%% Variance of enrichment via chain rule
 dMdtau = 1/(G^2)*(G*link_jacob - kron(link_val, J));
 dMdtau_A = transpose(dMdtau) * annot_mat;
 p_annot = mean(annot_mat, 1)';
-SE_h2 = sqrt(diag(transpose(dMdtau_A)*(params_inv*dMdtau_A)));
-enrich_SE = SE_h2(1:noParams) ./ p_annot(1:noParams);
+
+% naive SE estimator
+SE_prop_h2 = sqrt(diag(transpose(dMdtau_A)*(params_inv*dMdtau_A)));
+enrich_SE = SE_prop_h2(1:noParams) ./ p_annot(1:noParams);
 enrich_SE(1) = sqrt(J*(params_inv*transpose(J)));
 
-% Record variance and SE
+% robust / Huber-White estimator
+sandSE_prop_h2 = sqrt(diag(transpose(dMdtau_A)*(sandVar*dMdtau_A)));
+enrich_sandSE = sandSE_prop_h2(1:noParams) ./ p_annot(1:noParams);
+enrich_sandSE(1) = sqrt(J*(sandVar*transpose(J)));
+
+%% Variance of annot h2 via chain rule
+dMdtau_J = transpose(link_jacob) * annot_mat;
+
+% naive SE estimator
+SE_h2 = sqrt(diag(transpose(dMdtau_J)*(params_inv*dMdtau_J)));
+
+% robust / Huber-White estimator
+sandSE_h2 = sqrt(diag(transpose(dMdtau_J)*(sandVar*dMdtau_J)));
+
+%% Record variance and SE (both naive and model-based)
 estimate.paramVar = params_inv;
+estimate.paramSandVar = sandVar;
 estimate.SE = enrich_SE';
+estimate.sandSE = enrich_sandSE';
+estimate.h2SE = SE_h2';
+estimate.h2sandSE = sandSE_h2';
 
 if ~fixedIntercept
     estimate.intercept = params(end);
     estimate.interceptSE = sqrt(estimate.paramsVar(end,end));
+    estimate.interceptSandSE = sqrt(estimate.paramSandVar(end,end));
 else
     estimate.intercept = 1;
     estimate.interceptSE = 0;
 end
-
-% estimate.interceptSE = sqrt(estimate.paramsVar(end,end));
-% if all(cellfun(@(a)all(a(:,1)==1),annot_unnormalized))
-%     estimate.enrichmentZscore = (h2Est./annotSum - h2Est(1)/annotSum(1)) ./ ...
-%         sqrt(diag(h2Var)'./annotSum.^2 + h2Var(1)./annotSum(1).^2 - 2*h2Var(1,:)/annotSum(1)./annotSum);
-%     estimate.enrichmentZscore(1) = 0;
-% end
 
 end
 
