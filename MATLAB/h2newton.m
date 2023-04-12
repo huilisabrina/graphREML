@@ -77,6 +77,7 @@ addOptional(p, 'linkFn', @(a,x)log(1+exp(a*x))/mm, @(f)isa(f,'function_handle'))
 addOptional(p, 'linkFnGrad', @(a,x)exp(a*x).*a./(1+exp(a*x))/mm, @(f)isa(f,'function_handle'))
 addOptional(p, 'params', [], @isvector)
 addOptional(p, 'fixedIntercept', true, @isscalar)
+addOptional(p, 'intercept', 1, @isscalar)
 addOptional(p, 'printStuff', true, @isscalar)
 addOptional(p, 'noSamples', 0, @(x)isscalar(x) & round(x)==x)
 addOptional(p, 'convergenceTol', 1e-1, @isscalar)
@@ -104,7 +105,6 @@ blocksize = cellfun(@length, alphahat);
 noAnnot = size(annot{1},2);
 annotSum = cellfun(@(x){sum(x,1)},annot);
 annotSum = sum(vertcat(annotSum{:}));
-
 noBlocks = length(annot);
 if isempty(params)
     params = zeros(noAnnot,1);
@@ -113,8 +113,8 @@ if isempty(params)
     end
 end
 smallNumber = 1e-6;
-noParams = length(params) - 1 + fixedIntercept;
 
+noParams = length(params) - 1 + fixedIntercept;
 annot_unnormalized = annot;
 annot = annot;
 % annot = cellfun(@(a){mm*a./max(1,annotSum)},annot);
@@ -130,8 +130,6 @@ else
         P, sampleSize, whichIndices, params(end));
 
 end
-intercept = 1;
-
 newObjVal = objFn(params);
 
 % samples to be used to approximate the gradient
@@ -148,8 +146,8 @@ linkFn = linkFn;
 linkFnGrad = linkFnGrad; %#ok<*NODEF>
 sampleSize = sampleSize;
 fixedIntercept = fixedIntercept;
+intercept = intercept;
 noSamples = noSamples;
-
 allSteps=zeros(min(maxReps,1e6),noParams+1-fixedIntercept);
 allValues=zeros(min(maxReps,1e6),1);
 allGradients=allSteps;
@@ -274,6 +272,8 @@ for rep=1:maxReps
 
                 newObjVal = objFn(params_propose);
                 params = params_propose;
+                disp('Updated objective function value:')
+                disp(newObjVal)
             end
         
             % Update the trust region penalty
@@ -406,8 +406,9 @@ if ~fixedIntercept
     naiveVar = naiveVar(1:noParams, 1:noParams);
     sandVar = sandVar(1:noParams, 1:noParams);
 else
-    estimate.intercept = 1;
+    estimate.intercept = intercept;
     estimate.interceptSE = 0;
+    estimate.interceptSandSE = 0;
 end
 
 % naive SE estimator
