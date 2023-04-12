@@ -28,13 +28,7 @@ function [J] = GWASlikelihoodHessian(Z, sigmasq, P, nn, delSigmaDelA, whichSNPs,
 % where a==0, and it computes the derivative of the log-likelihood with 
 % respect to a; this will be the last element of J. 
 
-if nargin < 7
-    intercept = 1;
-end
 assert(isscalar(intercept) && all(intercept>=0,'all'))
-if nargin < 8
-    fixedIntercept = true;
-end
 
 if iscell(P) % handle cell-array-valued inputs
     if nargin < 6
