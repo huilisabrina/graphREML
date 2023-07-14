@@ -1,4 +1,4 @@
-function [estimate, steps] = h2newton(Z,P,varargin)
+function [estimate, steps, r2_proxy] = h2newton(Z,P,varargin)
 %h2newtoncomputes Newton-Raphson maximum-likelihood heritability estimates
 %   Required inputs:
 %   Z: Z scores, as a cell array with one cell per LD block.
@@ -6,11 +6,16 @@ function [estimate, steps] = h2newton(Z,P,varargin)
 %
 %   Optional inputs:
 %   nn: GWAS sample size
-%   whichIndices: which rows/cols in the LDGM have nonmissing summary statistics.
-%   Recommended to use as many SNPs as possible. All SNPs in the summary
-%   statistics vectors should be in the LDGM.
+%   whichIndicesSumstats: cell array with one entry per LD block,
+%   indicating which rows/cols in the precision matrix correspond to the 
+%   summary statistics. Recommended to use as many SNPs as possible. 
+%   Highly recommended to compute this using mergesnplists.m
+%   There should be no duplicates (SNPs with the same index)
+%   whichIndicesAnnot: which rows/cols of each precision matrix correspond 
+%   to the rows of the annotation matrices. There can be SNPs with
+%   duplicate indices.
 %   annot: annotation matrices, one for each LD block, same number of SNPs
-%   as alphahat
+%   as Z
 %   linkFn: function mapping from annotation vectors to per-SNP h2
 %   linkFnGrad: derivative of linkFn
 %   params: initial point for parameters
@@ -27,13 +32,13 @@ function [estimate, steps] = h2newton(Z,P,varargin)
 %   minReps: starts checking for convergence after this number of steps
 %   trustRegionSizeParam: hyperparameter used to tune the step size
 %   maxiter: maximum number of attempts to adjust step size
-%   trustRegionRhoLB: lower bound of the ratio of the actual and predicted 
+%   trustRegionRhoLB: lower bound of the ratio of the actual and predicted
 %   change of likelihood, i.e., a ratio lower than this threshold will lead
 %   to shrinkage of the trust region
-%   trustRegionRhoUB: upper bound of the ratio of the actual and predicted 
+%   trustRegionRhoUB: upper bound of the ratio of the actual and predicted
 %   change of likelihood, i.e., a ratio higher than this threshold will lead
 %   to expansion of the trust region
-%   trustRegionScalar: scaling factor for adjusting (shrink or expand) the 
+%   trustRegionScalar: scaling factor for adjusting (shrink or expand) the
 %   step size
 %   deltaGradCheck: whether to check the norm of gradient from iter to iter
 %   useTR: whether to use the trust-region algorithm to adjust for the step
@@ -59,6 +64,14 @@ function [estimate, steps] = h2newton(Z,P,varargin)
 %       obj: objective function value (-logLikelihood) at each step
 %       gradient: gradient of the objective function at each step
 %
+%   r2_proxy: struct with one entry per LD block, describing the LD proxies
+%   that were used for missing SNPs. Contains the following fields:
+%       oldIndices: indices present in whichIndicesAnnot but not
+%       whichIndicesSumstats
+%       newIndices: indices present in whichIndicesSumstats to which
+%       oldIndices were mapped
+%       r2: squared "correlation" (although n.b. it can be >1) between
+%       oldIndices and their LD proxies
 
 % initialize
 p=inputParser;
@@ -68,10 +81,11 @@ else
     mm = length(P);
 end
 
-addRequired(p, 'alphahat', @(x)isvector(x) || iscell(x))
+addRequired(p, 'Z', @(x)isvector(x) || iscell(x))
 addRequired(p, 'P', @(x)ismatrix(x) || iscell(x))
 addOptional(p, 'sampleSize', 1, @isscalar)
-addOptional(p, 'whichIndices', cellfun(@(x){true(size(x))},Z), @(x)isvector(x) || iscell(x))
+addOptional(p, 'whichIndicesSumstats', cellfun(@(x){true(size(x))},Z), @(x)isvector(x) || iscell(x))
+addOptional(p, 'whichIndicesAnnot', cellfun(@(x){true(size(x))},Z), @(x)isvector(x) || iscell(x))
 addOptional(p, 'annot', cellfun(@(x){true(size(x))},Z), @(x)size(x,1)==mm || iscell(x))
 addOptional(p, 'linkFn', @(a,x)log(1+exp(a*x))/mm, @(f)isa(f,'function_handle'))
 addOptional(p, 'linkFnGrad', @(a,x)exp(a*x).*a./(1+exp(a*x))/mm, @(f)isa(f,'function_handle'))
@@ -100,7 +114,7 @@ for k=1:numel(fields)
     eval(line);
 end
 
-blocksize = cellfun(@length, alphahat);
+blocksize = cellfun(@length, Z);
 
 noAnnot = size(annot{1},2);
 annotSum = cellfun(@(x){sum(x,1)},annot);
@@ -119,18 +133,6 @@ annot_unnormalized = annot;
 annot = annot;
 % annot = cellfun(@(a){mm*a./max(1,annotSum)},annot);
 
-if fixedIntercept
-    objFn = @(params)-GWASlikelihood(Z,...
-        cellfun(@(x){linkFn(x, params)}, annot),...
-        P, sampleSize, whichIndices, 1);
-
-else
-    objFn = @(params)-GWASlikelihood(Z,...
-        cellfun(@(x){linkFn(x, params(1:end-1))}, annot),...
-        P, sampleSize, whichIndices, params(end));
-
-end
-newObjVal = objFn(params);
 
 % samples to be used to approximate the gradient
 if noSamples > 0
@@ -141,7 +143,6 @@ else
 end
 
 % needed for parfor
-whichIndices = whichIndices; %#ok<*ASGSL>
 linkFn = linkFn;
 linkFnGrad = linkFnGrad; %#ok<*NODEF>
 sampleSize = sampleSize;
@@ -151,6 +152,55 @@ noSamples = noSamples;
 allSteps=zeros(min(maxReps,1e6),noParams+1-fixedIntercept);
 allValues=zeros(min(maxReps,1e6),1);
 allGradients=allSteps;
+
+% Merging between annotations + sumstats
+r2_proxy = struct('oldIndices',cell(noBlocks,1), 'newIndices', cell(noBlocks,1), 'r2', cell(noBlocks,1));
+whichSumstatsAnnot = cell(noBlocks,1);
+for block = 1:noBlocks
+    [uniqueIndices, ~, duplicates] = unique(whichIndicesAnnot{block});
+    
+    % Handle missingness in the annotations matrix
+    isMissing = ~ismember(whichIndicesSumstats{block}, uniqueIndices);
+    if any(isMissing)
+        whichIndicesSumstats{block} = whichIndicesSumstats{block}(~isMissing);
+        Z{block} = Z{block}(~isMissing);
+    end
+    
+    % Handle missingness in the summary statistics
+    isMissing = ~ismember(uniqueIndices, whichIndicesSumstats{block});
+    if any(isMissing)
+        identity = speye(length(uniqueIndices));
+        R_missing = precisionDivide(P{block}, identity(:,isMissing), uniqueIndices);
+        R_missing(isMissing,:) = 1i; % Make sure never to pick a missing SNP as proxy
+        r2_proxy(block).oldIndex = uniqueIndices(isMissing);
+        [r2_proxy(block).r2, idx] = max(R_missing.^2);
+        r2_proxy(block).newIndex = uniqueIndices(idx);
+        uniqueIndices(isMissing) = r2_proxy(block).newIndex;
+        whichIndicesAnnot{block} = uniqueIndices(duplicates);
+    end
+
+    % Re-order sumstats so indices are sorted
+    [whichIndicesSumstats{block}, reordering] = sort(whichIndicesSumstats{block});
+    Z{block} = Z{block}(reordering);
+    
+    % Mapping from annotations matrices to SNPs in the sumstats
+    [~, ~, whichSumstatsAnnot{block}] = unique(whichIndicesAnnot{block});
+
+end
+
+% Objective function
+if fixedIntercept
+    objFn = @(params)-GWASlikelihood(Z,...
+        cellfun(@(x){linkFn(x, params)}, annot),...
+        P, sampleSize, whichIndicesAnnot, 1);
+
+else
+    objFn = @(params)-GWASlikelihood(Z,...
+        cellfun(@(x){linkFn(x, params(1:end-1))}, annot),...
+        P, sampleSize, whichIndicesAnnot, params(end));
+
+end
+newObjVal = objFn(params);
 
 % main loop for updating parameter values
 for rep=1:maxReps
@@ -162,20 +212,31 @@ for rep=1:maxReps
     gradient = 0;
     hessian = 0;
 
-    parfor block = 1:noBlocks
-        sigmasq = linkFn(annot{block}, params(1:noParams));
-        sigmasqGrad = linkFnGrad(annot{block}, params(1:noParams));
-
+    for block = 1:noBlocks
+        % Effect-size variance for each sumstats SNPs, adding
+        % across annotation  SNPs
+        sigmasq = accumarray(whichSumstatsAnnot{block}, ...
+            linkFn(annot{block}, params(1:noParams)));
+        
+        % Gradient of the effect-size variance for each sumstats SNP
+        sg = linkFnGrad(annot{block}, params(1:noParams));
+        sigmasqGrad = zeros(length(sigmasq),size(sg,2));
+        for kk=1:size(sg,2)
+            sigmasqGrad(:,kk) = accumarray(whichSumstatsAnnot{block}, sg(:,kk));
+        end
+        
+        % Hessian of the log-likelihood
         hessian = hessian + ...
             GWASlikelihoodHessian(Z{block},sigmasq,P{block},...
-            sampleSize, sigmasqGrad, whichIndices{block}, intercept, fixedIntercept)';
-
+            sampleSize, sigmasqGrad, whichIndicesSumstats{block}, intercept, fixedIntercept)';
+        
+        % Gradient of the log-likelihood
         if noSamples > 0
             gradient = gradient + GWASlikelihoodGradientApproximate(Z{block},sigmasq,P{block},...
-                sampleSize, sigmasqGrad, whichIndices{block}, samples{block})';
+                sampleSize, sigmasqGrad, whichIndicesSumstats{block}, samples{block})';
         else
             gradient = gradient + GWASlikelihoodGradient(Z{block},sigmasq,P{block},...
-                sampleSize, sigmasqGrad, whichIndices{block}, intercept, fixedIntercept)';
+                sampleSize, sigmasqGrad, whichIndicesSumstats{block}, intercept, fixedIntercept)';
         end
     end
 
@@ -183,10 +244,10 @@ for rep=1:maxReps
     if ~useTR
         params = params - (hessian + trustRegionSizeParam * diag(diag(hessian)) + ...
             1e-2 * trustRegionSizeParam * mean(diag(hessian)) * eye(size(hessian))) \ gradient;
-    
+
         % New objective function value
         newObjVal = objFn(params);
-    
+
         if rep > 1 % update using heuristics
             while allValues(rep-1) - newObjVal < -smallNumber
                 trustRegionSizeParam = 2*trustRegionSizeParam;
@@ -200,7 +261,7 @@ for rep=1:maxReps
         % initialize some fixed values for step size tuning;
         oldParams = params;
         trustRegionLam = trustRegionSizeParam;
-        no_update = true; 
+        no_update = true;
         iter = 0;
         rho_arr = [];
 
@@ -209,7 +270,7 @@ for rep=1:maxReps
 
         while no_update && iter < maxiter
             iter = iter + 1;
-        
+
             % propose a new step (at the current value of trustRegionLam)
             hess_mod = hessian + trustRegionLam*diag(diag(hessian));
 
@@ -220,16 +281,17 @@ for rep=1:maxReps
             end
 
             stepSize = hess_mod \ gradient;
-            disp('Newly proposed step size:')
 
-            % Assess the proposed step -- eval likelihood (and gradient if 
+            if printStuff; disp('Newly proposed step size:'); end
+
+            % Assess the proposed step -- eval likelihood (and gradient if
             % specified) at the new values of parameter
             params_propose = oldParams - stepSize;
             newObjVal_propose = objFn(params_propose);
-            
+
             if deltaGradCheck
                 gradient_propose = 0;
-                parfor block = 1:noBlocks
+                for block = 1:noBlocks
                     sigmasq = linkFn(annot{block}, params_propose(1:noParams));
                     sigmasqGrad = linkFnGrad(annot{block}, params_propose(1:noParams));
 
@@ -249,14 +311,14 @@ for rep=1:maxReps
             % Evaluate the proposed step size
             delta_actual = newObjVal_propose - newObjVal;
             delta_pred = delta_pred_ll(stepSize);
-        
+
             % Assess the quality of the step
             if delta_actual > 0
-                disp('Neg-logL increased. Reject step size.')
+                if printStuff; disp('Neg-logL increased. Reject step size.'); end
                 rho = -1;
             elseif deltaGradCheck
                 if norm(gradient_propose) > (2*norm(gradient))
-                    disp('Gradient changes too much. Reject step size.')
+                    if printStuff; disp('Gradient changes too much. Reject step size.'); end
                     rho = -1;
                 else
                     rho = abs(delta_actual / delta_pred);
@@ -267,61 +329,71 @@ for rep=1:maxReps
 
             % Accept or reject the update
             if rho > trustRegionRhoLB
-                disp('Accepted step size')
                 no_update = false; % stops the search of step size
 
                 newObjVal = objFn(params_propose);
                 params = params_propose;
-                disp('Updated objective function value:')
-                disp(newObjVal)
+                if printStuff
+                    disp('Accepted step size')
+                    disp('Updated objective function value:')
+                    disp(newObjVal)
+                end
             end
-        
+
             % Update the trust region penalty
             if rho < trustRegionRhoLB
-                disp(['Shrink the trust region / ' ...
-                    'Increase the step size penalty term.'])
+                if printStuff
+                    disp(['Shrink the trust region / ' ...
+                        'Increase the step size penalty term.'])
+                end
                 trustRegionLam = trustRegionLam * trustRegionScalar;
             elseif rho > trustRegionRhoUB
-                disp(['Expand the trust region / ' ...
-                    'Reduce the step size penalty term.'])
-                trustRegionLam = trustRegionLam / trustRegionScalar;        
+                if printStuff
+                    disp(['Expand the trust region / ' ...
+                        'Reduce the step size penalty term.'])
+                end
+                trustRegionLam = trustRegionLam / trustRegionScalar;
             end
             rho_arr(end+1) = rho;
         end
-
-        disp('History of the rho values:')
-        disp(rho_arr)
-
-        % If adjustment is not successful, simply 
+        if printStuff
+            disp('History of the rho values:')
+            disp(rho_arr)
+        end
+        % If adjustment is not successful, simply
         % remove the gradient check and move on
         if iter == maxiter
             % give warnings of the updating
             warning(['After attempts to adjust step size, ' ...
-                    'gradient still changes too much'])
+                'gradient still changes too much'])
             warning('Ignore the gradient check and move on')
             rho = abs(delta_actual / delta_pred);
-        
+
             % Accept the change unless the ratio is too small
             if rho > trustRegionRhoLB
-                disp('Accepted step size')
+                if printStuff; disp('Accepted step size'); end
                 no_update = false;
                 newObjVal = objFn(params_propose);
                 params = params_propose;
+                if printStuff
+                    disp('Updated parameter values:')
+                    disp(params(1:5)')
+                end
+            end
+        else
+            if printStuff
                 disp('Updated parameter values:')
                 disp(params(1:5)')
             end
-        else
-            disp('Updated parameter values:')
-            disp(params(1:5)')
         end
 
         if ~fixedIntercept
             intercept = params(end);
         end
-    
+
         allValues(rep)=newObjVal;
         allSteps(rep,:)=params;
-    
+
         if rep > minReps
             if allValues(rep-minReps) - newObjVal < minReps * convergenceTol
                 break;
@@ -333,17 +405,22 @@ end
 %% Post-maximization computation
 % Compute block-specific gradient (once at the estimate)
 grad_blocks = zeros(noBlocks, noParams + 0^fixedIntercept);
-
 for block = 1:noBlocks
-    sigmasq = linkFn(annot{block}, params(1:noParams));
-    sigmasqGrad = linkFnGrad(annot{block}, params(1:noParams));
+    sigmasq = accumarray(whichSumstatsAnnot{block}, ...
+        linkFn(annot{block}, params(1:noParams)));
+
+    sg = linkFnGrad(annot{block}, params(1:noParams));
+    sigmasqGrad = zeros(length(sigmasq),size(sg,2));
+    for kk=1:size(sg,2)
+        sigmasqGrad(:,kk) = accumarray(whichSumstatsAnnot{block}, sg(:,kk));
+    end
 
     if noSamples > 0
         grad_blocks(block,:) = GWASlikelihoodGradientApproximate(Z{block},sigmasq,P{block},...
-            sampleSize, sigmasqGrad, whichIndices{block}, samples{block})';
+            sampleSize, sigmasqGrad, whichIndicesSumstats{block}, samples{block})';
     else
         grad_blocks(block,:) = GWASlikelihoodGradient(Z{block},sigmasq,P{block},...
-            sampleSize, sigmasqGrad, whichIndices{block}, intercept, fixedIntercept)';
+            sampleSize, sigmasqGrad, whichIndicesSumstats{block}, intercept, fixedIntercept)';
     end
 end
 
