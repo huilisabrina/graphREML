@@ -439,7 +439,7 @@ for block=1:noBlocks
     h2Est = h2Est + sum(perSNPh2.*annot_unnormalized{block});
 end
 
-estimate.params = params';
+estimate.params = params;
 estimate.h2 = h2Est;
 estimate.annotSum = annotSum;
 estimate.logLikelihood = -newObjVal;
@@ -519,12 +519,16 @@ sand_pval = enrichment_pval(estimate.h2, sandSE_h2, sand_cov, p_annot');
 %% Record variance and SE (both naive and model-based)
 estimate.paramVar = naiveVar;
 estimate.paramSandVar = sandVar;
+estimate.paramSE = sqrt(diag(naiveVar));
+estimate.paramSandSE = sqrt(diag(sandVar));
 estimate.SE = enrich_SE';
 estimate.sandSE = enrich_sandSE';
 estimate.h2SE = SE_h2';
 estimate.h2sandSE = sandSE_h2';
 estimate.enrichPval = naive_pval;
 estimate.enrichsandPval = sand_pval;
+estimate.coefPval = compute_pval(params, naiveVar);
+estimate.coefsandPval = compute_pval(params, sandVar);
 
 end
 
