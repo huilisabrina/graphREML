@@ -405,6 +405,7 @@ end
 %% Post-maximization computation
 % Compute block-specific gradient (once at the estimate)
 grad_blocks = zeros(noBlocks, noParams + 0^fixedIntercept);
+hess_blocks = zeros(noParams + 0^fixedIntercept, noParams + 0^fixedIntercept, noBlocks);
 for block = 1:noBlocks
     sigmasq = accumarray(whichSumstatsAnnot{block}, ...
         linkFn(annot{block}, params(1:noParams)));
@@ -422,6 +423,15 @@ for block = 1:noBlocks
         grad_blocks(block,:) = GWASlikelihoodGradient(Z{block},sigmasq,P{block},...
             sampleSize, sigmasqGrad, whichIndicesSumstats{block}, intercept, fixedIntercept)';
     end
+
+   hess_blocks(:,:,block) = GWASlikelihoodHessian(Z{block},sigmasq,P{block},...
+                sampleSize, sigmasqGrad, whichIndicesSumstats{block}, intercept, fixedIntercept)';
+        
+end
+hessian = sum(hess_blocks,3);
+psudojackknife = zeros(noBlocks, noParams + 0^fixedIntercept);
+for block = 1:noBlocks
+    psudojackknife(block,:) = params + ( hessian - hess_blocks(:,:,block) + 1e-12*eye(size(hessian))) \ grad_blocks(block,:)';
 end
 
 % Convergence report
@@ -463,6 +473,7 @@ naiveVar = pinv(FI);
 % Approximate empirical covariance of the score (using the block-wise estimates)
 empVarApprox = cov(grad_blocks) * noBlocks;
 sandVar = naiveVar*(empVarApprox*naiveVar);
+jkVar = cov(psudojackknife) * (noBlocks-2);
 
 % Turn annotation and coefficients to genetic variances
 annot_mat = vertcat(annot{:});
@@ -482,6 +493,7 @@ if ~fixedIntercept
     estimate.interceptSandSE = sqrt(sandVar(end,end));
     naiveVar = naiveVar(1:noParams, 1:noParams);
     sandVar = sandVar(1:noParams, 1:noParams);
+    jkVar = jkVar(1:noParams,1:noParams);
 else
     estimate.intercept = intercept;
     estimate.interceptSE = 0;
@@ -498,6 +510,11 @@ sandSE_prop_h2 = sqrt(diag(transpose(dMdtau_A)*(sandVar*dMdtau_A)));
 enrich_sandSE = sandSE_prop_h2(1:noParams) ./ p_annot(1:noParams);
 enrich_sandSE(1) = sqrt(J*(sandVar*transpose(J)));
 
+% robust / Huber-White estimator
+jkSE_prop_h2 = sqrt(diag(transpose(dMdtau_A)*(jkVar*dMdtau_A)));
+enrich_jkSE = jkSE_prop_h2(1:noParams) ./ p_annot(1:noParams);
+enrich_jkSE(1) = sqrt(J*(jkVar*transpose(J)));
+
 %% Variance of annot h2 via chain rule
 dMdtau_J = transpose(link_jacob) * annot_mat;
 
@@ -509,12 +526,19 @@ SE_h2 = sqrt(diag(naive_cov));
 sand_cov = transpose(dMdtau_J)*(sandVar*dMdtau_J);
 sandSE_h2 = sqrt(diag(sand_cov));
 
+jk_cov = transpose(dMdtau_J)*(jkVar*dMdtau_J);
+jkSE_h2 = sqrt(diag(jk_cov));
+
+
 %% Compute p-values for enrichment (defined as difference)
 % based on naive SE
 naive_pval = enrichment_pval(estimate.h2, SE_h2, naive_cov, p_annot');
 
 % based on robust SE
 sand_pval = enrichment_pval(estimate.h2, sandSE_h2, sand_cov, p_annot');
+
+% based on jk SE
+jk_pval = enrichment_pval(estimate.h2, jkSE_h2, jk_cov, p_annot');
 
 %% Record variance and SE (both naive and model-based)
 estimate.paramVar = naiveVar;
@@ -523,12 +547,16 @@ estimate.paramSE = sqrt(diag(naiveVar));
 estimate.paramSandSE = sqrt(diag(sandVar));
 estimate.SE = enrich_SE';
 estimate.sandSE = enrich_sandSE';
+estimate.jkSE = enrich_jkSE';
 estimate.h2SE = SE_h2';
 estimate.h2sandSE = sandSE_h2';
+estimate.h2jkSE = jkSE_h2';
 estimate.enrichPval = naive_pval;
 estimate.enrichsandPval = sand_pval;
+estimate.enrichjkPval = jk_pval;
 estimate.coefPval = compute_pval(params, naiveVar);
 estimate.coefsandPval = compute_pval(params, sandVar);
+estimate.coefjkPval = compute_pval(params, jkVar);
 
 end
 
