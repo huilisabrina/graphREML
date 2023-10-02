@@ -429,9 +429,10 @@ for block = 1:noBlocks
         
 end
 hessian = sum(hess_blocks,3);
+grad = sum(grad_blocks,1);
 psudojackknife = zeros(noBlocks, noParams + 0^fixedIntercept);
 for block = 1:noBlocks
-    psudojackknife(block,:) = params + ( hessian - hess_blocks(:,:,block) + 1e-12*eye(size(hessian))) \ grad_blocks(block,:)';
+    psudojackknife(block,:) = params + ( hessian - hess_blocks(:,:,block) + 1e-12*eye(size(hessian))) \ (grad_blocks(block,:) - grad)';
 end
 
 % Convergence report
@@ -510,12 +511,12 @@ sandSE_prop_h2 = sqrt(diag(transpose(dMdtau_A)*(sandVar*dMdtau_A)));
 enrich_sandSE = sandSE_prop_h2(1:noParams) ./ p_annot(1:noParams);
 enrich_sandSE(1) = sqrt(J*(sandVar*transpose(J)));
 
-% robust / Huber-White estimator
+% jackknife estimator
 jkSE_prop_h2 = sqrt(diag(transpose(dMdtau_A)*(jkVar*dMdtau_A)));
 enrich_jkSE = jkSE_prop_h2(1:noParams) ./ p_annot(1:noParams);
 enrich_jkSE(1) = sqrt(J*(jkVar*transpose(J)));
 
-%% Variance of annot h2 via chain rule
+%% Variance of annot-h2 via chain rule
 dMdtau_J = transpose(link_jacob) * annot_mat;
 
 % naive SE estimator
@@ -526,6 +527,7 @@ SE_h2 = sqrt(diag(naive_cov));
 sand_cov = transpose(dMdtau_J)*(sandVar*dMdtau_J);
 sandSE_h2 = sqrt(diag(sand_cov));
 
+% jackknife estimator
 jk_cov = transpose(dMdtau_J)*(jkVar*dMdtau_J);
 jkSE_h2 = sqrt(diag(jk_cov));
 
@@ -540,11 +542,12 @@ sand_pval = enrichment_pval(estimate.h2, sandSE_h2, sand_cov, p_annot');
 % based on jk SE
 jk_pval = enrichment_pval(estimate.h2, jkSE_h2, jk_cov, p_annot');
 
-%% Record variance and SE (both naive and model-based)
+%% Record variance and SE
 estimate.paramVar = naiveVar;
 estimate.paramSandVar = sandVar;
 estimate.paramSE = sqrt(diag(naiveVar));
 estimate.paramSandSE = sqrt(diag(sandVar));
+estimate.paramJackSE = sqrt(diag(jkVar))
 estimate.SE = enrich_SE';
 estimate.sandSE = enrich_sandSE';
 estimate.jkSE = enrich_jkSE';
