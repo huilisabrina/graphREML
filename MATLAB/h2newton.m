@@ -156,7 +156,9 @@ allGradients=allSteps;
 % Merging between annotations + sumstats
 r2_proxy = struct('oldIndices',cell(noBlocks,1), 'newIndices', cell(noBlocks,1), 'r2', cell(noBlocks,1));
 whichSumstatsAnnot = cell(noBlocks,1);
+
 for block = 1:noBlocks
+
     [uniqueIndices, ~, duplicates] = unique(whichIndicesAnnot{block});
     
     % Handle missingness in the annotations matrix
@@ -212,7 +214,7 @@ for rep=1:maxReps
     gradient = 0;
     hessian = 0;
 
-    for block = 1:noBlocks
+    parfor block = 1:noBlocks
         % Effect-size variance for each sumstats SNPs, adding
         % across annotation  SNPs
         sigmasq = accumarray(whichSumstatsAnnot{block}, ...
@@ -291,7 +293,7 @@ for rep=1:maxReps
 
             if deltaGradCheck
                 gradient_propose = 0;
-                for block = 1:noBlocks
+                parfor block = 1:noBlocks
                     sigmasq = linkFn(annot{block}, params_propose(1:noParams));
                     sigmasqGrad = linkFnGrad(annot{block}, params_propose(1:noParams));
 
@@ -406,7 +408,7 @@ end
 % Compute block-specific gradient (once at the estimate)
 grad_blocks = zeros(noBlocks, noParams + 0^fixedIntercept);
 hess_blocks = zeros(noParams + 0^fixedIntercept, noParams + 0^fixedIntercept, noBlocks);
-for block = 1:noBlocks
+parfor block = 1:noBlocks
     sigmasq = accumarray(whichSumstatsAnnot{block}, ...
         linkFn(annot{block}, params(1:noParams)));
 
