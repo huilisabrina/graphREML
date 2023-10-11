@@ -566,7 +566,7 @@ estimate.coefjkPval = compute_pval(params, jkVar);
 %% Record variance-covariance matrices
 diagnostics.paramVar = naiveVar;
 diagnostics.paramSandVar = sandVar;
-diagnostics.paramJackVar = jackVar;
+diagnostics.paramJackVar = jkVar;
 diagnostics.cov = naive_cov;
 diagnostics.sand_cov = sand_cov;
 diagnostics.jack_cov = jk_cov;
