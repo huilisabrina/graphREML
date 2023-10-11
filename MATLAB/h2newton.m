@@ -1,4 +1,4 @@
-function [estimate, steps, r2_proxy] = h2newton(Z,P,varargin)
+function [estimate, steps, r2_proxy, diagnostics] = h2newton(Z,P,varargin)
 %h2newtoncomputes Newton-Raphson maximum-likelihood heritability estimates
 %   Required inputs:
 %   Z: Z scores, as a cell array with one cell per LD block.
