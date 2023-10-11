@@ -104,7 +104,7 @@ addOptional(p, 'trustRegionRhoUB', 0.99, @isscalar)
 addOptional(p, 'trustRegionScalar', 10, @isscalar)
 addOptional(p, 'deltaGradCheck', false, @isscalar)
 addOptional(p, 'useTR', true, @isscalar)
-addOptional(p, 'refCol', 1, @isscalar)
+addOptional(p, 'refCol', 1, @isnumeric)
 
 parse(p, Z, P, varargin{:});
 
@@ -537,13 +537,13 @@ jkSE_h2 = sqrt(diag(jk_cov));
 
 %% Compute p-values for enrichment (defined as difference)
 % based on naive SE
-naive_pval = enrichment_pval(estimate.h2, SE_h2, naive_cov, p_annot', 'k', refCol);
+naive_pval = enrichment_pval(estimate.h2, SE_h2, naive_cov, p_annot', 'refCol', refCol);
 
 % based on robust SE
-sand_pval = enrichment_pval(estimate.h2, sandSE_h2, sand_cov, p_annot', 'k', refCol);
+sand_pval = enrichment_pval(estimate.h2, sandSE_h2, sand_cov, p_annot', 'refCol', refCol);
 
 % based on jk SE
-jk_pval = enrichment_pval(estimate.h2, jkSE_h2, jk_cov, p_annot', 'k', refCol);
+jk_pval = enrichment_pval(estimate.h2, jkSE_h2, jk_cov, p_annot', 'refCol', refCol);
 
 %% Record estimates
 estimate.paramSE = sqrt(diag(naiveVar));
