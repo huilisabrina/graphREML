@@ -8,7 +8,10 @@ function [pval] = enrichment_pval(h2, h2SE, h2Cov, p_vec, varargin)
 %   refCol: index of the annotation to compute enrichment
 
     p=inputParser;
-
+    addRequired(p, 'h2', @(x)isvector(x))
+    addRequired(p, 'h2SE', @(x)isvector(x))
+    addRequired(p, 'h2Cov', @(x)ismatrix(x))
+    addRequired(p, 'p_vec', @(x)isvector(x))
     addOptional(p, 'refCol', 1, @isscalar)
     parse(p, h2, h2SE, h2Cov, p_vec, varargin{:});
 
