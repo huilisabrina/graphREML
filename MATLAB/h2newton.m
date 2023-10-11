@@ -537,13 +537,13 @@ jkSE_h2 = sqrt(diag(jk_cov));
 
 %% Compute p-values for enrichment (defined as difference)
 % based on naive SE
-naive_pval = enrichment_pval(estimate.h2, SE_h2, naive_cov, p_annot', 'refCol', refCol);
+naive_pval = enrichment_pval(estimate.h2, SE_h2, naive_cov, p_annot', 'k', refCol);
 
 % based on robust SE
-sand_pval = enrichment_pval(estimate.h2, sandSE_h2, sand_cov, p_annot', 'refCol', refCol);
+sand_pval = enrichment_pval(estimate.h2, sandSE_h2, sand_cov, p_annot', 'k', refCol);
 
 % based on jk SE
-jk_pval = enrichment_pval(estimate.h2, jkSE_h2, jk_cov, p_annot', 'refCol', refCol);
+jk_pval = enrichment_pval(estimate.h2, jkSE_h2, jk_cov, p_annot', 'k', refCol);
 
 %% Record estimates
 estimate.paramSE = sqrt(diag(naiveVar));
