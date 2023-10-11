@@ -104,6 +104,7 @@ addOptional(p, 'trustRegionRhoUB', 0.99, @isscalar)
 addOptional(p, 'trustRegionScalar', 10, @isscalar)
 addOptional(p, 'deltaGradCheck', false, @isscalar)
 addOptional(p, 'useTR', true, @isscalar)
+addOptional(p, 'refCol', 1, @isscalar)
 
 parse(p, Z, P, varargin{:});
 
@@ -536,20 +537,19 @@ jkSE_h2 = sqrt(diag(jk_cov));
 
 %% Compute p-values for enrichment (defined as difference)
 % based on naive SE
-naive_pval = enrichment_pval(estimate.h2, SE_h2, naive_cov, p_annot');
+naive_pval = enrichment_pval(estimate.h2, SE_h2, naive_cov, p_annot', 'refCol', refCol);
 
 % based on robust SE
-sand_pval = enrichment_pval(estimate.h2, sandSE_h2, sand_cov, p_annot');
+sand_pval = enrichment_pval(estimate.h2, sandSE_h2, sand_cov, p_annot', 'refCol', refCol);
 
 % based on jk SE
-jk_pval = enrichment_pval(estimate.h2, jkSE_h2, jk_cov, p_annot');
+jk_pval = enrichment_pval(estimate.h2, jkSE_h2, jk_cov, p_annot', 'refCol', refCol);
 
-%% Record variance and SE
-estimate.paramVar = naiveVar;
-estimate.paramSandVar = sandVar;
+%% Record estimates
 estimate.paramSE = sqrt(diag(naiveVar));
 estimate.paramSandSE = sqrt(diag(sandVar));
-estimate.paramJackSE = sqrt(diag(jkVar))
+estimate.paramJackSE = sqrt(diag(jkVar));
+estimate.p_annot = p_annot';
 estimate.SE = enrich_SE';
 estimate.sandSE = enrich_sandSE';
 estimate.jkSE = enrich_jkSE';
@@ -562,6 +562,14 @@ estimate.enrichjkPval = jk_pval;
 estimate.coefPval = compute_pval(params, naiveVar);
 estimate.coefsandPval = compute_pval(params, sandVar);
 estimate.coefjkPval = compute_pval(params, jkVar);
+
+%% Record variance-covariance matrices
+diagnostics.paramVar = naiveVar;
+diagnostics.paramSandVar = sandVar;
+diagnostics.paramJackVar = jackVar;
+diagnostics.cov = naive_cov;
+diagnostics.sand_cov = sand_cov;
+diagnostics.jack_cov = jk_cov;
 
 end
 
