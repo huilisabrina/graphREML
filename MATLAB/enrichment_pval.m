@@ -16,7 +16,6 @@ function [pval] = enrichment_pval(h2, h2SE, h2Cov, p_vec, varargin)
     parse(p, h2, h2SE, h2Cov, p_vec, varargin{:});
 
     % turns p.Results.x into just x
-    parse(p, sumstats_fp, varargin{:});
     fields = fieldnames(p.Results);
     for k=1:numel(fields)
         line = sprintf('%s = p.Results.%s;', fields{k}, fields{k});
@@ -24,7 +23,7 @@ function [pval] = enrichment_pval(h2, h2SE, h2Cov, p_vec, varargin)
     end
 
     datetime.setDefaultFormats('default','yyyy-MM-dd hh:mm:ss')
-    
+
     T = h2 ./ p_vec - h2(refCol) / p_vec(refCol);
     var_vec = diag(h2Cov)';
     SE = sqrt(var_vec ./ (p_vec.^2) + var_vec(refCol) ./ (p_vec(refCol)^2) - ...
