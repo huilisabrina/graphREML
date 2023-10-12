@@ -294,7 +294,7 @@ for rep=1:maxReps
 
             if deltaGradCheck
                 gradient_propose = 0;
-                parfor block = 1:noBlocks
+                for block = 1:noBlocks
                     sigmasq = linkFn(annot{block}, params_propose(1:noParams));
                     sigmasqGrad = linkFnGrad(annot{block}, params_propose(1:noParams));
 
