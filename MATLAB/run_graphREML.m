@@ -1,11 +1,11 @@
-function [estimate, steps, r2_proxy, diagnostics] = h2newton(Z,P,varargin)
+function [estimate, steps, r2_proxy, diagnostics] = run_graphREML(Z,P,varargin)
 %h2newtoncomputes Newton-Raphson maximum-likelihood heritability estimates
 %   Required inputs:
 %   Z: Z scores, as a cell array with one cell per LD block.
-%   P: LD graphacal model as a cell array.
+%   P: LDGM precision matrices as a cell array.
 %
 %   Optional inputs:
-%   nn: GWAS sample size
+%   sampleSize: GWAS sample size
 %   whichIndicesSumstats: cell array with one entry per LD block,
 %   indicating which rows/cols in the precision matrix correspond to the 
 %   summary statistics. Recommended to use as many SNPs as possible. 
@@ -23,11 +23,10 @@ function [estimate, steps, r2_proxy, diagnostics] = h2newton(Z,P,varargin)
 %   inverse matrix when calculating gradient. Default 0 uses exact
 %   calculation instead of sampling.
 %   printStuff: verbosity
-%   fixedIntercept: whether intercept should be fixed at 1/nn, or learned
-%   automatically. Default 1. fixedIntercept=0 currently unsupported.
+%   fixedIntercept: whether intercept should be fixed. 
+%   Default 1. fixedIntercept=0 currently unsupported.
 %   convergenceTol: terminates when objective function improves less than
-%   this
-%   convergenceTol: when log-likelihood improves by less, declare convergence
+%   this; when log-likelihood improves by less, declare convergence
 %   maxReps: maximum number of steps to perform
 %   minReps: starts checking for convergence after this number of steps
 %   trustRegionSizeParam: hyperparameter used to tune the step size
@@ -43,9 +42,11 @@ function [estimate, steps, r2_proxy, diagnostics] = h2newton(Z,P,varargin)
 %   deltaGradCheck: whether to check the norm of gradient from iter to iter
 %   useTR: whether to use the trust-region algorithm to adjust for the step
 %   size
+%   refCol: which column of the annotaion matrix to use as the baseline
+%   or refernece for computing enrichment
 %
 %   Output arguments:
-%   estimate: struct containing the following fields:
+%   estimate: struct containing the following fields: (to be updated)
 %       params: estimated paramters
 %       h2: heritability estimates for each annotation; equal to \sum_j
 %       h^2(j) a_kj, where a_kj is annotation value for annotation k and
@@ -72,6 +73,15 @@ function [estimate, steps, r2_proxy, diagnostics] = h2newton(Z,P,varargin)
 %       oldIndices were mapped
 %       r2: squared "correlation" (although n.b. it can be >1) between
 %       oldIndices and their LD proxies
+
+%   diagnostics: struct containing the following fields
+%       paramVar: model-based covariance matrix of the coefficients;
+%       paramSandVar: sandwich covariance matrix of the coefficients;
+%       paramJackVar: jackknife covariance matrix of the coefficeints;
+%       cov: model-based covariance matrix of [total partitioned] heritability;
+%       sand_cov: sandwich covariance matrix of [total partitioned] heritability;
+%       jack_cov: jackknife covariance matrix of [total partitioned] heritability;
+
 
 % initialize
 p=inputParser;
