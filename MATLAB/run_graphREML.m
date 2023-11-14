@@ -44,6 +44,8 @@ function [estimate, steps, r2_proxy, diagnostics] = run_graphREML(Z,P,varargin)
 %   size
 %   refCol: which column of the annotaion matrix to use as the baseline
 %   or refernece for computing enrichment
+%   chisqThreshold: threshold at which large effect loci will be discarded,
+%   together with their entire LD block. 
 %
 %   Output arguments:
 %   estimate: struct containing the following fields: (to be updated)
@@ -115,6 +117,7 @@ addOptional(p, 'trustRegionScalar', 10, @isscalar)
 addOptional(p, 'deltaGradCheck', false, @isscalar)
 addOptional(p, 'useTR', true, @isscalar)
 addOptional(p, 'refCol', 1, @isnumeric)
+addOptional(p, 'chisqThreshold', inf, @isscalar)
 
 parse(p, Z, P, varargin{:});
 
@@ -125,8 +128,21 @@ for k=1:numel(fields)
     eval(line);
 end
 
-blocksize = cellfun(@length, Z);
+% throw out LD blocks with a chisq statistic greater than threshold
+maxChisq = cellfun(@(x)max(x.^2), Z);
+keep = maxChisq <= chisqThreshold;
+if any(~keep)
+    if printstuff
+        fprintf('Discarding %d out of %d LD blocks due to chisq threshold\n', sum(~keep), length(Z))
+    end
+    Z = Z(keep);
+    P = P(keep);
+    whichIndicesAnnot = whichIndicesAnnot(keep);
+    whichIndicesSumstats = whichIndicesSumstats(keep);
+    annot = annot(keep);
+end
 
+blocksize = cellfun(@length, Z);
 noAnnot = size(annot{1},2);
 annotSum = cellfun(@(x){sum(x,1)},annot);
 annotSum = sum(vertcat(annotSum{:}));
