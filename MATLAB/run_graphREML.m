@@ -1,4 +1,4 @@
-function [estimate, steps, r2_proxy, diagnostics, h2_jackknife] = run_graphREML(Z,P,varargin)
+function [estimate, steps, r2_proxy, diagnostics, jackknife] = run_graphREML(Z,P,varargin)
 %h2newtoncomputes Newton-Raphson maximum-likelihood heritability estimates
 %   Required inputs:
 %   Z: Z scores, as a cell array with one cell per LD block.
@@ -481,11 +481,12 @@ end
 
 % h2 estimates for each leave-one-out subset of the data
 if nargout >= 5
-    h2_jackknife = zeros(size(psudojackknife));
+    jackknife.params = psudojackknife;
+    jackknife.h2 = zeros(size(psudojackknife));
     for block = 1:noBlocks
         for jk = 1:noBlocks
             perSNPh2_jk = linkFn(annot{block}, psudojackknife(jk, 1:noParams));
-            h2_jackknife(jk,:) = h2_jackknife(jk,:) + sum(perSNPh2_jk .* annot_unnormalized{block});
+            jackknife.h2(jk,:) = jackknife.h2(jk,:) + sum(perSNPh2_jk .* annot_unnormalized{block});
         end
     end
 end
