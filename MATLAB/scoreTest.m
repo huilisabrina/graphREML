@@ -1,4 +1,4 @@
-function [score, scoreTestStat, chisq_pval_hess, chisq_pval_jack] = scoreTest(Z,P,null_params,null_cols,test_col,varargin)
+function [score, scoreTestStat_hess, scoreTestStat_jack, chisq_pval_hess, chisq_pval_jack] = scoreTest(Z,P,null_params,null_cols,test_col,varargin)
 %h2newtoncomputes Newton-Raphson maximum-likelihood heritability estimates
 %   Required inputs:
 %   Z: Z scores, as a cell array with one cell per LD block.
