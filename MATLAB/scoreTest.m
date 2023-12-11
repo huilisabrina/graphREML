@@ -1,4 +1,4 @@
-function [score, scoreTestStat, chisq_pval] = scoreTest(Z,P,null_params,null_cols,test_col,varargin)
+function [score, scoreTestStat_hess, scoreTestStat_jack, chisq_pval_hess, chisq_pval_jack] = scoreTest(Z,P,null_params,null_cols,test_col,varargin)
 %h2newtoncomputes Newton-Raphson maximum-likelihood heritability estimates
 %   Required inputs:
 %   Z: Z scores, as a cell array with one cell per LD block.
@@ -51,9 +51,12 @@ addRequired(p, "test_col", @isscalar)
 addOptional(p, 'sampleSize', 1, @isscalar)
 addOptional(p, 'whichIndicesSumstats', cellfun(@(x){true(size(x))},Z), @(x)isvector(x) || iscell(x))
 addOptional(p, 'whichIndicesAnnot', cellfun(@(x){true(size(x))},Z), @(x)isvector(x) || iscell(x))
+addOptional(p, 'sigmasq', cellfun(@(x){true(size(x))},Z), @(x)isvector(x) || iscell(x))
+addOptional(p, 'sg_noChain', cellfun(@(x){true(size(x))},Z), @(x)isvector(x) || iscell(x))
 addOptional(p, 'annot', cellfun(@(x){true(size(x))},Z), @(x)size(x,1)==mm || iscell(x))
 addOptional(p, 'linkFn', @(a,x)log(1+exp(a*x))/mm, @(f)isa(f,'function_handle'))
 addOptional(p, 'linkFnGrad', @(a,x)exp(a*x).*a./(1+exp(a*x))/mm, @(f)isa(f,'function_handle'))
+addOptional(p, 'intercept', 1, @isscalar)
 addOptional(p, 'printStuff', true, @isscalar)
 addOptional(p, 'noSamples', 0, @(x)isscalar(x) & round(x)==x)
 
@@ -107,8 +110,11 @@ end
 % needed for parfor
 linkFn = linkFn;
 linkFnGrad = linkFnGrad; %#ok<*NODEF>
+intercept = intercept;
 sampleSize = sampleSize;
 noSamples = noSamples;
+sigmasq = sigmasq;
+sg_noChain = sg_noChain;
 
 % Merging between annotations + sumstats
 r2_proxy = struct('oldIndices',cell(noBlocks,1), 'newIndices', cell(noBlocks,1), 'r2', cell(noBlocks,1));
@@ -147,41 +153,54 @@ end
 
 % compute and record gradient for each block
 scoreStat_block = zeros(noBlocks, noParams);
+hess_blocks = zeros(noParams, noParams, noBlocks);
 
 parfor block = 1:noBlocks
-    % Effect-size variance for each sumstats SNPs, adding across annotations
-    sigmasq = accumarray(whichSumstatsAnnot{block}, ...
-        linkFn(annot{block}, params(1:noParams)));
-    
-    % Gradient of the effect-size variance for each sumstats SNP
-    sg = linkFnGrad(annot{block}, params(1:noParams));
-    sigmasqGrad = zeros(length(sigmasq),size(sg,2));
+    % FAST: assuming sigmasq and sg_noChain are provided
+    sigmasqGrad = zeros(length(sigmasq(block)),noParams);
 
-    for kk=1:size(sg,2)
-        sigmasqGrad(:,kk) = accumarray(whichSumstatsAnnot{block}, sg(:,kk));
+    for kk=1:size(sg,2);
+        sigmasqGrad(:,kk) = accumarray(whichSumstatsAnnot{block}, sg_noChain(block) .* annot{block}(:,kk));
     end
-    
+
     % Gradient of the log-likelihood
     if noSamples > 0
-        scoreStat_block(block,:) = GWASlikelihoodGradientApproximate(Z{block},sigmasq,P{block},...
+        scoreStat_block(block,:) = GWASlikelihoodGradientApproximate(Z{block}, sigmasq(block), P{block},...
             sampleSize, sigmasqGrad, whichIndicesSumstats{block}, samples{block})';
     else
-        scoreStat_block(block,:) = GWASlikelihoodGradient(Z{block},sigmasq,P{block},...
-            sampleSize, sigmasqGrad, whichIndicesSumstats{block}, 1, 1)';
+        scoreStat_block(block,:) = GWASlikelihoodGradient(Z{block}, sigmasq(block), P{block},...
+            sampleSize, sigmasqGrad, whichIndicesSumstats{block}, intercept, 1)';
     end
+
+    % Hessian of the log-likelihood
+    hess_blocks(:,:,block) = GWASlikelihoodHessian(Z{block},sigmasq(block),P{block},...
+                sampleSize, sigmasqGrad, whichIndicesSumstats{block}, intercept, 1)
 end
 
 % construct score test
 score = sum(scoreStat_block,1);
+hessian = sum(hess_blocks,3);
 
 for block = 1:noBlocks
     psudoJkScore(block,:) = score - scoreStat_block(block,:);
 end
 
+% compute covariance using the hessian
+FI = -hessian;
+if any(diag(FI)==0)
+    warning(['Some parameters have zero fisher information. ' ...
+        'Regularizing FI matrix to obtain standard errors.'])
+    FI = FI + 1e-6*eye(size(FI));
+end
+naiveVarScore = pinv(FI);
+scoreTestStat_hess = score * pinv(naiveVarScore) * transpose(score) ;
+chisq_pval_hess =  chi2cdf(scoreTestStat_hess, 1, 'upper');
+
+
 % compute the empirical covariance using jackknife
 jkVarScore = cov(psudoJkScore) * (noBlocks-2);
-scoreTestStat = score * pinv(jkVarScore) * transpose(score) ;
-[h,chisq_pval] = chi2gof(scoreTestStat,'Alpha',0.05);
-chisq_pval =  chi2cdf(scoreTestStat, 1, 'upper');
+scoreTestStat_jack = score * pinv(jkVarScore) * transpose(score) ;
+% [h,chisq_pval] = chi2gof(scoreTestStat,'Alpha',0.05);
+chisq_pval_jack =  chi2cdf(scoreTestStat_jack, 1, 'upper');
 
 end
