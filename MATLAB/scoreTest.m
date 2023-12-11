@@ -1,4 +1,4 @@
-function [score, scoreTestStat, chisq_pval] = scoreTest(Z,P,null_params,null_cols,test_col,varargin)
+function [score, scoreTestStat, chisq_pval_hess, chisq_pval_jack] = scoreTest(Z,P,null_params,null_cols,test_col,varargin)
 %h2newtoncomputes Newton-Raphson maximum-likelihood heritability estimates
 %   Required inputs:
 %   Z: Z scores, as a cell array with one cell per LD block.
@@ -54,6 +54,7 @@ addOptional(p, 'whichIndicesAnnot', cellfun(@(x){true(size(x))},Z), @(x)isvector
 addOptional(p, 'annot', cellfun(@(x){true(size(x))},Z), @(x)size(x,1)==mm || iscell(x))
 addOptional(p, 'linkFn', @(a,x)log(1+exp(a*x))/mm, @(f)isa(f,'function_handle'))
 addOptional(p, 'linkFnGrad', @(a,x)exp(a*x).*a./(1+exp(a*x))/mm, @(f)isa(f,'function_handle'))
+addOptional(p, 'intercept', 1, @isscalar)
 addOptional(p, 'printStuff', true, @isscalar)
 addOptional(p, 'noSamples', 0, @(x)isscalar(x) & round(x)==x)
 
@@ -107,6 +108,7 @@ end
 % needed for parfor
 linkFn = linkFn;
 linkFnGrad = linkFnGrad; %#ok<*NODEF>
+intercept = intercept;
 sampleSize = sampleSize;
 noSamples = noSamples;
 
@@ -147,6 +149,7 @@ end
 
 % compute and record gradient for each block
 scoreStat_block = zeros(noBlocks, noParams);
+hess_blocks = zeros(noParams, noParams, noBlocks);
 
 parfor block = 1:noBlocks
     % Effect-size variance for each sumstats SNPs, adding across annotations
@@ -167,21 +170,38 @@ parfor block = 1:noBlocks
             sampleSize, sigmasqGrad, whichIndicesSumstats{block}, samples{block})';
     else
         scoreStat_block(block,:) = GWASlikelihoodGradient(Z{block},sigmasq,P{block},...
-            sampleSize, sigmasqGrad, whichIndicesSumstats{block}, 1, 1)';
+            sampleSize, sigmasqGrad, whichIndicesSumstats{block}, intercept, 1)';
     end
+
+    % Hessian of the log-likelihood
+    hess_blocks(:,:,block) = GWASlikelihoodHessian(Z{block},sigmasq,P{block},...
+                sampleSize, sigmasqGrad, whichIndicesSumstats{block}, intercept, 1)
 end
 
 % construct score test
 score = sum(scoreStat_block,1);
+hessian = sum(hess_blocks,3);
 
 for block = 1:noBlocks
     psudoJkScore(block,:) = score - scoreStat_block(block,:);
 end
 
+% compute covariance using the hessian
+FI = -hessian;
+if any(diag(FI)==0)
+    warning(['Some parameters have zero fisher information. ' ...
+        'Regularizing FI matrix to obtain standard errors.'])
+    FI = FI + 1e-6*eye(size(FI));
+end
+naiveVarScore = pinv(FI);
+scoreTestStat_hess = score * pinv(naiveVarScore) * transpose(score) ;
+chisq_pval_hess =  chi2cdf(scoreTestStat_hess, 1, 'upper');
+
+
 % compute the empirical covariance using jackknife
 jkVarScore = cov(psudoJkScore) * (noBlocks-2);
-scoreTestStat = score * pinv(jkVarScore) * transpose(score) ;
-[h,chisq_pval] = chi2gof(scoreTestStat,'Alpha',0.05);
-chisq_pval =  chi2cdf(scoreTestStat, 1, 'upper');
+scoreTestStat_jack = score * pinv(jkVarScore) * transpose(score) ;
+% [h,chisq_pval] = chi2gof(scoreTestStat,'Alpha',0.05);
+chisq_pval_jack =  chi2cdf(scoreTestStat_jack, 1, 'upper');
 
 end
