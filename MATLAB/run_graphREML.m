@@ -251,8 +251,8 @@ for rep=1:maxReps
         sg = linkFnGrad(annot{block}, params(1:noParams));
         sigmasqGrad = zeros(length(sigmasq), noParams);
 
-        for kk = 1:size(sg,2)
-            sigmasqGrad(:,kk) = accumarray(whichSumstatsAnnot{block}, sg(:,kk) .* annot{block}(:,kk));
+        for kk = 1:noParams
+            sigmasqGrad(:,kk) = accumarray(whichSumstatsAnnot{block}, sg(:,kk));
         end
         
         % Hessian of the log-likelihood
