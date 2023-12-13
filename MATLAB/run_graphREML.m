@@ -435,6 +435,7 @@ end
 % Compute block-specific gradient (once at the estimate)
 grad_blocks = zeros(noBlocks, noParams + 0^fixedIntercept);
 hess_blocks = zeros(noParams + 0^fixedIntercept, noParams + 0^fixedIntercept, noBlocks);
+snpGrad = cell(noBlocks,1);
 parfor block = 1:noBlocks
     sigmasq = accumarray(whichSumstatsAnnot{block}, ...
         linkFn(annot{block}, params(1:noParams)));
@@ -449,8 +450,9 @@ parfor block = 1:noBlocks
         grad_blocks(block,:) = GWASlikelihoodGradientApproximate(Z{block},sigmasq,P{block},...
             sampleSize, sigmasqGrad, whichIndicesSumstats{block}, samples{block})';
     else
-        grad_blocks(block,:) = GWASlikelihoodGradient(Z{block},sigmasq,P{block},...
-            sampleSize, sigmasqGrad, whichIndicesSumstats{block}, intercept, fixedIntercept)';
+        [grad_blocks(block,:), nodeGrad] = GWASlikelihoodGradient(Z{block},sigmasq,P{block},...
+            sampleSize, sigmasqGrad, whichIndicesSumstats{block}, intercept, fixedIntercept);
+        snpGrad{block} = sg(:,1) .* nodeGrad(whichSumstatsAnnot{block});
     end
 
    hess_blocks(:,:,block) = GWASlikelihoodHessian(Z{block},sigmasq,P{block},...
@@ -485,10 +487,11 @@ if nargout >= 5
     jackknife.h2 = zeros(size(psudojackknife));
     for block = 1:noBlocks
         for jk = 1:noBlocks
-            perSNPh2_jk = linkFn(annot{block}, psudojackknife(jk, 1:noParams));
+            perSNPh2_jk = linkFn(annot{block}, psudojackknife(jk, 1:noParams)');
             jackknife.h2(jk,:) = jackknife.h2(jk,:) + sum(perSNPh2_jk .* annot_unnormalized{block});
         end
     end
+    jackknife.score = snpGrad;
 end
 
 estimate.params = params;
