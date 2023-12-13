@@ -438,14 +438,11 @@ end
 % Compute block-specific gradient (once at the estimate)
 grad_blocks = zeros(noBlocks, noParams + 0^fixedIntercept);
 hess_blocks = zeros(noParams + 0^fixedIntercept, noParams + 0^fixedIntercept, noBlocks);
-<<<<<<< HEAD
 snpGrad = cell(noBlocks,1);
-=======
 sigmasq_block = cell(noBlocks,1);
 sg_noChain_block = cell(noBlocks,1);
 
 
->>>>>>> 973c1f59f93f7eaca31762dbefa56fe6b92d33db
 parfor block = 1:noBlocks
     sigmasq = accumarray(whichSumstatsAnnot{block}, ...
         linkFn(annot{block}, params(1:noParams)));
