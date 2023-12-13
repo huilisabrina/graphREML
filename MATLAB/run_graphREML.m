@@ -249,9 +249,10 @@ for rep=1:maxReps
         
         % Gradient of the effect-size variance for each sumstats SNP
         sg = linkFnGrad(annot{block}, params(1:noParams));
-        sigmasqGrad = zeros(length(sigmasq),size(sg,2));
-        for kk=1:size(sg,2)
-            sigmasqGrad(:,kk) = accumarray(whichSumstatsAnnot{block}, sg(:,kk));
+        sigmasqGrad = zeros(length(sigmasq), noParams);
+
+        for kk = 1:size(sg,2)
+            sigmasqGrad(:,kk) = accumarray(whichSumstatsAnnot{block}, sg(:,kk) .* annot{block}(:,kk));
         end
         
         % Hessian of the log-likelihood
@@ -322,7 +323,7 @@ for rep=1:maxReps
                 gradient_propose = 0;
                 for block = 1:noBlocks
                     sigmasq = linkFn(annot{block}, params_propose(1:noParams));
-                    sigmasqGrad = linkFnGrad(annot{block}, params_propose(1:noParams));
+                    sigmasqGrad = linkFnGrad(annot{block}, params_propose(1:noParams)) .* annot{block};
 
                     if noSamples > 0
                         gradient_propose = gradient_propose + ...
@@ -431,20 +432,33 @@ for rep=1:maxReps
     end
 end
 
+
+
 %% Post-maximization computation
 % Compute block-specific gradient (once at the estimate)
 grad_blocks = zeros(noBlocks, noParams + 0^fixedIntercept);
 hess_blocks = zeros(noParams + 0^fixedIntercept, noParams + 0^fixedIntercept, noBlocks);
+<<<<<<< HEAD
 snpGrad = cell(noBlocks,1);
+=======
+sigmasq_block = cell(noBlocks,1);
+sg_noChain_block = cell(noBlocks,1);
+
+
+>>>>>>> 973c1f59f93f7eaca31762dbefa56fe6b92d33db
 parfor block = 1:noBlocks
     sigmasq = accumarray(whichSumstatsAnnot{block}, ...
         linkFn(annot{block}, params(1:noParams)));
 
-    sg = linkFnGrad(annot{block}, params(1:noParams));
-    sigmasqGrad = zeros(length(sigmasq),size(sg,2));
-    for kk=1:size(sg,2)
-        sigmasqGrad(:,kk) = accumarray(whichSumstatsAnnot{block}, sg(:,kk));
+    sg_noChain = linkFnGrad(annot{block}, params(1:noParams));
+    sigmasqGrad = zeros(length(sigmasq), noParams);
+
+    for kk=1:size(sg_noChain,2)
+        sigmasqGrad(:,kk) = accumarray(whichSumstatsAnnot{block}, sg_noChain(:,kk) .* annot{block}(:,kk));
     end
+
+    sigmasq_block{block} = sigmasq;
+    sg_noChain_block{block} = sg_noChain;
 
     if noSamples > 0
         grad_blocks(block,:) = GWASlikelihoodGradientApproximate(Z{block},sigmasq,P{block},...
@@ -523,7 +537,7 @@ jkVar = cov(psudojackknife) * (noBlocks-2);
 % Turn annotation and coefficients to genetic variances
 annot_mat = vertcat(annot{:});
 link_val = linkFn(annot_mat, params(1:noParams));
-link_jacob = linkFnGrad(annot_mat, params(1:noParams));
+link_jacob = linkFnGrad(annot_mat, params(1:noParams)) .* annot_mat;
 G = sum(link_val);
 J = sum(link_jacob, 1);
 
@@ -611,6 +625,8 @@ diagnostics.paramJackVar = jkVar;
 diagnostics.cov = naive_cov;
 diagnostics.sand_cov = sand_cov;
 diagnostics.jack_cov = jk_cov;
+diagnostics.sigmasq = sigmasq_block;
+diagnostics.sg_noChain = sg_noChain_block;
 
 end
 
