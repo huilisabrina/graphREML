@@ -439,23 +439,17 @@ end
 grad_blocks = zeros(noBlocks, noParams + 0^fixedIntercept);
 hess_blocks = zeros(noParams + 0^fixedIntercept, noParams + 0^fixedIntercept, noBlocks);
 snpGrad = cell(noBlocks,1);
-sigmasq_block = cell(noBlocks,1);
-sg_noChain_block = cell(noBlocks,1);
-
 
 parfor block = 1:noBlocks
     sigmasq = accumarray(whichSumstatsAnnot{block}, ...
         linkFn(annot{block}, params(1:noParams)));
 
-    sg_noChain = linkFnGrad(annot{block}, params(1:noParams));
+    sg = linkFnGrad(annot{block}, params(1:noParams));
     sigmasqGrad = zeros(length(sigmasq), noParams);
 
-    for kk=1:size(sg_noChain,2)
-        sigmasqGrad(:,kk) = accumarray(whichSumstatsAnnot{block}, sg_noChain(:,kk) .* annot{block}(:,kk));
+    for kk=1:noParams
+        sigmasqGrad(:,kk) = accumarray(whichSumstatsAnnot{block}, sg(:,kk));
     end
-
-    sigmasq_block{block} = sigmasq;
-    sg_noChain_block{block} = sg_noChain;
 
     if noSamples > 0
         grad_blocks(block,:) = GWASlikelihoodGradientApproximate(Z{block},sigmasq,P{block},...
@@ -622,8 +616,6 @@ diagnostics.paramJackVar = jkVar;
 diagnostics.cov = naive_cov;
 diagnostics.sand_cov = sand_cov;
 diagnostics.jack_cov = jk_cov;
-diagnostics.sigmasq = sigmasq_block;
-diagnostics.sg_noChain = sg_noChain_block;
 
 end
 
