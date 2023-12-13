@@ -330,8 +330,7 @@ for rep=1:maxReps
                             GWASlikelihoodGradientApproximate(Z{block},sigmasq,P{block},...
                             sampleSize, sigmasqGrad, whichIndicesSumstats{block}, samples{block})';
                     else
-                        gradient_propose = gradient_propose + ...
-                            GWASlikelihoodGradient(Z{block},sigmasq,P{block},...
+                        gradient_propose = gradient_propose + GWASlikelihoodGradient(Z{block},sigmasq,P{block},...
                             sampleSize, sigmasqGrad, whichIndicesSumstats{block}, ...
                             intercept, fixedIntercept)';
                     end
@@ -433,7 +432,6 @@ for rep=1:maxReps
 end
 
 
-
 %% Post-maximization computation
 % Compute block-specific gradient (once at the estimate)
 grad_blocks = zeros(noBlocks, noParams + 0^fixedIntercept);
@@ -460,7 +458,7 @@ parfor block = 1:noBlocks
         snpGrad{block} = sg(:,1) .* nodeGrad(whichSumstatsAnnot{block});
     end
 
-   hess_blocks(:,:,block) = GWASlikelihoodHessian(Z{block},sigmasq,P{block},...
+    hess_blocks(:,:,block) = GWASlikelihoodHessian(Z{block},sigmasq,P{block},...
                 sampleSize, sigmasqGrad, whichIndicesSumstats{block}, intercept, fixedIntercept)';
         
 end
