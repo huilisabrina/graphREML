@@ -240,7 +240,7 @@ for rep=1:maxReps
     % Compute gradient and hessian by summing over blocks
     gradient = 0;
     hessian = 0;
-
+    tic;
     parfor block = 1:noBlocks
         % Effect-size variance for each sumstats SNPs, adding
         % across annotation  SNPs
@@ -269,8 +269,10 @@ for rep=1:maxReps
                 sampleSize, sigmasqGrad, whichIndicesSumstats{block}, intercept, fixedIntercept)';
         end
     end
+    timeMain(rep) = toc;
 
     % Compute step (with the option to use trust region for adaptive step size)
+    tic;
     if ~useTR
         params = params - (hessian + trustRegionSizeParam * diag(diag(hessian)) + ...
             1e-2 * trustRegionSizeParam * mean(diag(hessian)) * eye(size(hessian))) \ gradient;
@@ -402,7 +404,6 @@ for rep=1:maxReps
             if rho > trustRegionRhoLB
                 if printStuff; disp('Accepted step size'); end
                 no_update = false;
-                newObjVal = objFn(params_propose);
                 params = params_propose;
                 if printStuff
                     disp('Updated parameter values:')
@@ -429,6 +430,8 @@ for rep=1:maxReps
             end
         end
     end
+    timeTR(rep) = toc;
+    
 end
 
 
@@ -475,6 +478,8 @@ if nargout > 1
     steps.params = allSteps(1:rep,:);
     steps.obj = allValues(1:rep);
     steps.gradient = allGradients(1:rep,:);
+    steps.timeParFor = timeMain;
+    steps.timeStepSize = timeTR;
 end
 
 % From paramaters to h2 estimates
