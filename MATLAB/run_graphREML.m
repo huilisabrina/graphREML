@@ -30,6 +30,8 @@ function [estimate, steps, r2_proxy, diagnostics, jackknife] = run_graphREML(Z,P
 %   maxReps: maximum number of steps to perform
 %   minReps: starts checking for convergence after this number of steps
 %   trustRegionSizeParam: hyperparameter used to tune the step size
+%   resetTrustRegionLam: whether to reset the trust region size parameter
+%   at each iteration
 %   maxiter: maximum number of attempts to adjust step size
 %   trustRegionRhoLB: lower bound of the ratio of the actual and predicted
 %   change of likelihood, i.e., a ratio lower than this threshold will lead
@@ -114,6 +116,7 @@ addOptional(p, 'maxiter', 20, @isscalar)
 addOptional(p, 'trustRegionRhoLB', 1e-4, @isscalar)
 addOptional(p, 'trustRegionRhoUB', 0.99, @isscalar)
 addOptional(p, 'trustRegionScalar', 10, @isscalar)
+addOptional(p, 'resetTrustRegionLam', true, @isscalar)
 addOptional(p, 'deltaGradCheck', false, @isscalar)
 addOptional(p, 'useTR', true, @isscalar)
 addOptional(p, 'refCol', 1, @isnumeric)
@@ -292,7 +295,9 @@ for rep=1:maxReps
     else
         % initialize some fixed values for step size tuning;
         oldParams = params;
-        trustRegionLam = trustRegionSizeParam;
+        if resetTrustRegionLam
+            trustRegionLam = trustRegionSizeParam;
+        end
         no_update = true;
         iter = 0;
         rho_arr = [];
@@ -307,11 +312,9 @@ for rep=1:maxReps
             hess_mod = hessian + trustRegionLam*diag(diag(hessian));
 
             % to prevent NaN step size, add scaled diag matrix to hess
-            if rcond(hess_mod) < 1e-30
-                hess_mod = hess_mod + 1e-2 * trustRegionSizeParam *...
-                    mean(diag(hessian)) * eye(size(hessian));
-            end
-
+            hess_mod = hess_mod + 1e-2 * trustRegionLam *...
+                mean(diag(hessian)) / mean(abs(gradient)) * diag(abs(gradient));
+            
             stepSize = hess_mod \ gradient;
 
             if printStuff; disp('Newly proposed step size:'); end
