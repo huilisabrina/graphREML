@@ -313,7 +313,8 @@ for rep=1:maxReps
 
             % to prevent NaN step size, add scaled diag matrix to hess
             hess_mod = hess_mod + 1e-2 * trustRegionLam *...
-                mean(diag(hessian)) / mean(abs(gradient)) * diag(abs(gradient));
+                mean(diag(hessian)) / mean(abs(gradient)) * diag(abs(gradient)) + ...
+                eps * eye(size(hess_mod));
             
             stepSize = hess_mod \ gradient;
 
