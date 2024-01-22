@@ -369,7 +369,7 @@ for rep=1:maxReps
             if rho > trustRegionRhoLB
                 no_update = false; % stops the search of step size
 
-                newObjVal = objFn(params_propose);
+                newObjVal = newObjVal_propose;
                 params = params_propose;
                 if printStuff
                     disp('Accepted step size')
