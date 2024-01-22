@@ -131,18 +131,21 @@ for k=1:numel(fields)
     eval(line);
 end
 
-% throw out LD blocks with a chisq statistic greater than threshold
-maxChisq = cellfun(@(x)max(x.^2), Z);
-keep = maxChisq <= chisqThreshold;
-if any(~keep)
-    if printstuff
-        fprintf('Discarding %d out of %d LD blocks due to chisq threshold\n', sum(~keep), length(Z))
+% throw out LD blocks with a chisq statistic greater than threshold, or
+% empty
+emptyblocks = cellfun(@isempty,Z);
+maxChisq = inf * ones(size(Z));
+maxChisq(~emptyblocks) = cellfun(@(x)max(x.^2), Z(~emptyblocks));
+keep_blocks = maxChisq < chisqThreshold;
+if any(~keep_blocks)
+    if printStuff
+        fprintf('Discarding %d out of %d LD blocks due to chisq threshold\n', sum(~keep_blocks), length(Z))
     end
-    Z = Z(keep);
-    P = P(keep);
-    whichIndicesAnnot = whichIndicesAnnot(keep);
-    whichIndicesSumstats = whichIndicesSumstats(keep);
-    annot = annot(keep);
+    Z = Z(keep_blocks);
+    P = P(keep_blocks);
+    whichIndicesAnnot = whichIndicesAnnot(keep_blocks);
+    whichIndicesSumstats = whichIndicesSumstats(keep_blocks);
+    annot = annot(keep_blocks);
 end
 
 blocksize = cellfun(@length, Z);
@@ -495,15 +498,17 @@ end
 
 % h2 estimates for each leave-one-out subset of the data
 if nargout >= 5
-    jackknife.params = psudojackknife;
-    jackknife.h2 = zeros(size(psudojackknife));
+    jackknife.params = repmat(params',length(keep_blocks),1);
+    jackknife.params(keep_blocks,:) = psudojackknife;
+    jackknife.h2 = zeros(size(jackknife.params));
     for block = 1:noBlocks
-        for jk = 1:noBlocks
-            perSNPh2_jk = linkFn(annot{block}, psudojackknife(jk, 1:noParams)');
+        for jk = 1:length(keep_blocks)
+            perSNPh2_jk = linkFn(annot{block}, jackknife.params(jk, 1:noParams)');
             jackknife.h2(jk,:) = jackknife.h2(jk,:) + sum(perSNPh2_jk .* annot_unnormalized{block});
         end
     end
-    jackknife.score = snpGrad;
+    jackknife.score = cell(size(keep_blocks));
+    jackknife.score(keep_blocks) = snpGrad;
 end
 
 estimate.params = params;
