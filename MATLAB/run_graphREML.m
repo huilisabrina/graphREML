@@ -121,6 +121,7 @@ addOptional(p, 'deltaGradCheck', false, @isscalar)
 addOptional(p, 'useTR', true, @isscalar)
 addOptional(p, 'refCol', 1, @isnumeric)
 addOptional(p, 'chisqThreshold', inf, @isscalar)
+addOptional(p, 'normalizeAnnot', false, @isscalar)
 
 parse(p, Z, P, varargin{:});
 
@@ -163,8 +164,12 @@ smallNumber = 1e-6;
 
 noParams = length(params) - 1 + fixedIntercept;
 annot_unnormalized = annot;
-annot = annot;
-% annot = cellfun(@(a){mm*a./max(1,annotSum)},annot);
+
+if normalizeAnnot
+    annot = cellfun(@(a){mm*a./max(1,annotSum)},annot);
+else
+    annot = annot;
+end
 
 
 % samples to be used to approximate the gradient
@@ -298,7 +303,7 @@ for rep=1:maxReps
     else
         % initialize some fixed values for step size tuning;
         oldParams = params;
-        if resetTrustRegionLam
+        if resetTrustRegionLam || rep == 1
             trustRegionLam = trustRegionSizeParam;
         end
         no_update = true;
@@ -395,7 +400,7 @@ for rep=1:maxReps
             rho_arr(end+1) = rho;
         end
         if printStuff
-            disp('History of the rho values:')
+            disp('History of rho for step size selection:')
             disp(rho_arr)
         end
         % If adjustment is not successful, simply
