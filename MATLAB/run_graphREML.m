@@ -125,6 +125,7 @@ addOptional(p, 'refCol', 1, @isnumeric)
 addOptional(p, 'chisqThreshold', inf, @isscalar)
 addOptional(p, 'largeEffectBehavior', 'keep', @ischar)
 addOptional(p, 'normalizeAnnot', false, @isscalar)
+addOptional(p, 'nullFit', false, @isscalar)
 
 parse(p, Z, P, varargin{:});
 noBlocks = length(P);
@@ -232,7 +233,7 @@ sampleSize = sampleSize;
 fixedIntercept = fixedIntercept;
 intercept = intercept;
 noSamples = noSamples;
-nullFit = true; %%  
+nullFit = nullFit; %%  
 allSteps=zeros(min(maxReps,1e6),noParams+1-fixedIntercept);
 allValues=zeros(min(maxReps,1e6),1);
 allGradients=allSteps;
