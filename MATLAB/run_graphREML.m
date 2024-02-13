@@ -232,7 +232,7 @@ sampleSize = sampleSize;
 fixedIntercept = fixedIntercept;
 intercept = intercept;
 noSamples = noSamples;
-nullFit = nullFit; 
+nullFit = true; %%  
 allSteps=zeros(min(maxReps,1e6),noParams+1-fixedIntercept);
 allValues=zeros(min(maxReps,1e6),1);
 allGradients=allSteps;
@@ -562,7 +562,6 @@ end
 
 % From paramaters to h2 estimates
 h2Est = 0;
-h2Est_noLargeEffects = 0;
 for block=1:noBlocks
     perSNPh2 = linkFn(annot{block}(:,1:noParamsInit), params(1:noParamsInit));
     h2Est = h2Est + sum(perSNPh2.*annot_unnormalized{block});
