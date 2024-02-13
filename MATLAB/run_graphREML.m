@@ -103,6 +103,7 @@ addOptional(p, 'whichIndicesAnnot', cellfun(@(x){true(size(x))},Z), @(x)isvector
 addOptional(p, 'annot', cellfun(@(x){true(size(x))},Z), @(x)size(x,1)==mm || iscell(x))
 addOptional(p, 'linkFn', @(a,x)log(1+exp(a*x))/mm, @(f)isa(f,'function_handle'))
 addOptional(p, 'linkFnGrad', @(a,x)exp(a*x).*a./(1+exp(a*x))/mm, @(f)isa(f,'function_handle'))
+addOptional(p, 'linkFn2Grad', @(a,x)exp(a*x).*a.*a./(1+exp(a*x))./(1+exp(a*x))/mm, @(f)isa(f,'function_handle'))
 addOptional(p, 'params', [], @isvector)
 addOptional(p, 'fixedIntercept', true, @isscalar)
 addOptional(p, 'intercept', 1, @isscalar)
@@ -183,10 +184,12 @@ end
 % needed for parfor
 linkFn = linkFn;
 linkFnGrad = linkFnGrad; %#ok<*NODEF>
+linkFn2Grad = linkFn2Grad; 
 sampleSize = sampleSize;
 fixedIntercept = fixedIntercept;
 intercept = intercept;
 noSamples = noSamples;
+nullFit = nullFit; 
 allSteps=zeros(min(maxReps,1e6),noParams+1-fixedIntercept);
 allValues=zeros(min(maxReps,1e6),1);
 allGradients=allSteps;
@@ -451,7 +454,11 @@ end
 % Compute block-specific gradient (once at the estimate)
 grad_blocks = zeros(noBlocks, noParams + 0^fixedIntercept);
 hess_blocks = zeros(noParams + 0^fixedIntercept, noParams + 0^fixedIntercept, noBlocks);
-snpGrad = cell(noBlocks,1);
+
+if nullFit
+    snpGrad = cell(noBlocks,1);
+    snpHess = cell(noBlocks,1);
+end
 
 parfor block = 1:noBlocks
     sigmasq = accumarray(whichSumstatsAnnot{block}, ...
@@ -459,6 +466,7 @@ parfor block = 1:noBlocks
 
     sg = linkFnGrad(annot{block}, params(1:noParams));
     sigmasqGrad = zeros(length(sigmasq), noParams);
+    sh = linkFn2Grad(annot{block}, params(1:noParams));
 
     for kk=1:noParams
         sigmasqGrad(:,kk) = accumarray(whichSumstatsAnnot{block}, sg(:,kk));
@@ -468,15 +476,27 @@ parfor block = 1:noBlocks
         grad_blocks(block,:) = GWASlikelihoodGradientApproximate(Z{block},sigmasq,P{block},...
             sampleSize, sigmasqGrad, whichIndicesSumstats{block}, samples{block})';
     else
-        [grad_blocks(block,:), nodeGrad] = GWASlikelihoodGradient(Z{block},sigmasq,P{block},...
-            sampleSize, sigmasqGrad, whichIndicesSumstats{block}, intercept, fixedIntercept);
-        snpGrad{block} = sg(:,1) .* nodeGrad(whichSumstatsAnnot{block});
+        if nullFit
+            [grad_blocks(block,:), nodeGrad] = GWASlikelihoodGradient(Z{block},sigmasq,P{block},...
+                sampleSize, sigmasqGrad, whichIndicesSumstats{block}, intercept, fixedIntercept);
+            snpGrad{block} = sg(:,1) .* nodeGrad(whichSumstatsAnnot{block});
+        else
+            grad_blocks(block,:) = GWASlikelihoodGradient(Z{block},sigmasq,P{block},...
+                sampleSize, sigmasqGrad, whichIndicesSumstats{block}, intercept, fixedIntercept);
+        end
     end
 
-    hess_blocks(:,:,block) = GWASlikelihoodHessian(Z{block},sigmasq,P{block},...
-                sampleSize, sigmasqGrad, whichIndicesSumstats{block}, intercept, fixedIntercept)';
-        
+    if nullFit
+        [temp, nodeHess] = GWASlikelihoodHessian(Z{block},sigmasq,P{block},...
+                    sampleSize, sigmasqGrad, whichIndicesSumstats{block}, intercept, fixedIntercept);
+        hess_blocks(:,:,block) = temp';
+        snpHess{block} = sh(:,1) .* nodeGrad(whichSumstatsAnnot{block}) + sg(:,1).^2 .* nodeHess(whichSumstatsAnnot{block});
+    else
+        hess_blocks(:,:,block) = GWASlikelihoodHessian(Z{block},sigmasq,P{block},...
+                    sampleSize, sigmasqGrad, whichIndicesSumstats{block}, intercept, fixedIntercept)';
+    end        
 end
+
 hessian = sum(hess_blocks,3);
 grad = sum(grad_blocks,1);
 psudojackknife = zeros(noBlocks, noParams + 0^fixedIntercept);
@@ -490,6 +510,9 @@ if nargout > 1
     steps.params = allSteps(1:rep,:);
     steps.obj = allValues(1:rep);
     steps.gradient = allGradients(1:rep,:);
+    if length(timeMain) < rep
+        timeMain(rep) = Inf;
+    end
     steps.timeParFor = timeMain;
     steps.timeStepSize = timeTR;
 end
@@ -512,8 +535,13 @@ if nargout >= 5
             jackknife.h2(jk,:) = jackknife.h2(jk,:) + sum(perSNPh2_jk .* annot_unnormalized{block});
         end
     end
-    jackknife.score = cell(size(keep_blocks));
-    jackknife.score(keep_blocks) = snpGrad;
+
+    if nullFit
+        jackknife.score = cell(size(keep_blocks));
+        jackknife.score(keep_blocks) = snpGrad;
+        jackknife.hess = cell(size(keep_blocks));
+        jackknife.hess(keep_blocks) = snpHess;
+    end
 end
 
 estimate.params = params;
