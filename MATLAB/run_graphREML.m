@@ -104,6 +104,7 @@ addOptional(p, 'annot', cellfun(@(x){true(size(x))},Z), @(x)size(x,1)==mm || isc
 addOptional(p, 'linkFn', @(a,x)log(1+exp(a*x))/mm, @(f)isa(f,'function_handle'))
 addOptional(p, 'linkFnGrad', @(a,x)exp(a*x).*a./(1+exp(a*x))/mm, @(f)isa(f,'function_handle'))
 addOptional(p, 'linkFn2Grad', @(a,x)exp(a*x).*a.*a./(1+exp(a*x))./(1+exp(a*x))/mm, @(f)isa(f,'function_handle'))
+addOptional(p, 'linkFnInv', @(h2snp)log(exp(h2snp*mm)-1) , @(f)isa(f,'function_handle'))
 addOptional(p, 'params', [], @isvector)
 addOptional(p, 'fixedIntercept', true, @isscalar)
 addOptional(p, 'intercept', 1, @isscalar)
@@ -122,9 +123,11 @@ addOptional(p, 'deltaGradCheck', false, @isscalar)
 addOptional(p, 'useTR', true, @isscalar)
 addOptional(p, 'refCol', 1, @isnumeric)
 addOptional(p, 'chisqThreshold', inf, @isscalar)
+addOptional(p, 'largeEffectBehavior', 'keep', @ischar)
 addOptional(p, 'normalizeAnnot', false, @isscalar)
 
 parse(p, Z, P, varargin{:});
+noBlocks = length(P);
 
 % turns p.Results.x into just x
 fields = fieldnames(p.Results);
@@ -138,10 +141,15 @@ end
 emptyblocks = cellfun(@isempty,Z);
 maxChisq = inf * ones(size(Z));
 maxChisq(~emptyblocks) = cellfun(@(x)max(x.^2), Z(~emptyblocks));
-keep_blocks = maxChisq < chisqThreshold;
+if strcmp(largeEffectBehavior,'discard')
+    keep_blocks = maxChisq < chisqThreshold;
+else
+    keep_blocks = ~emptyblocks;
+    maxChisq(emptyblocks) = 0;
+end
 if any(~keep_blocks)
     if printStuff
-        fprintf('Discarding %d out of %d LD blocks due to chisq threshold\n', sum(~keep_blocks), length(Z))
+        fprintf('Discarding %d out of %d LD blocks\n', sum(~keep_blocks), length(Z))
     end
     Z = Z(keep_blocks);
     P = P(keep_blocks);
@@ -149,6 +157,41 @@ if any(~keep_blocks)
     whichIndicesSumstats = whichIndicesSumstats(keep_blocks);
     annot = annot(keep_blocks);
 end
+
+noParamsInit = length(params);
+if strcmpi(largeEffectBehavior,'annotateSNP')
+    if any(maxChisq > chisqThreshold)
+        for block = 1:noBlocks
+            a = zeros(size(annot{block},1),1);
+            if maxChisq(block) > chisqThreshold
+                [~,leadSNP] = max(Z{block}.^2);
+                a(leadSNP) = 1;
+            end
+            annot{block}(:,end+1) = a;
+        end
+        if ~isempty(params)
+            params(end+1) = linkFnInv(chisqThreshold);
+        end
+    end
+elseif strcmpi(largeEffectBehavior,'annotateBlock')
+    if any(maxChisq > chisqThreshold)
+        for block = 1:noBlocks
+            if maxChisq(block) > chisqThreshold
+                a = ones(size(annot{block},1),1);
+            else
+                a = zeros(size(annot{block},1),1);
+            end
+            annot{block}(:,end+1) = a;
+        end
+        if ~isempty(params)
+            params(end+1) = linkFnInv(chisqThreshold/(mm/noBlocks));
+        end
+    end
+else
+    assert(any(strcmpi(largeEffectBehavior,{'keep','discard'})),...
+        "Valid options for largeEffectBehavior are 'keep', 'discard', 'annotateSNP' and 'annotateBlock'")
+end
+
 
 blocksize = cellfun(@length, Z);
 noAnnot = size(annot{1},2);
@@ -519,8 +562,9 @@ end
 
 % From paramaters to h2 estimates
 h2Est = 0;
+h2Est_noLargeEffects = 0;
 for block=1:noBlocks
-    perSNPh2 = linkFn(annot{block}, params(1:noParams));
+    perSNPh2 = linkFn(annot{block}(:,1:noParamsInit), params(1:noParamsInit));
     h2Est = h2Est + sum(perSNPh2.*annot_unnormalized{block});
 end
 
@@ -531,7 +575,8 @@ if nargout >= 5
     jackknife.h2 = zeros(size(jackknife.params));
     for block = 1:noBlocks
         for jk = 1:length(keep_blocks)
-            perSNPh2_jk = linkFn(annot{block}, jackknife.params(jk, 1:noParams)');
+            perSNPh2_jk = linkFn(annot{block}(:,1:noParamsInit), ...
+                jackknife.params(jk, 1:noParamsInit)');
             jackknife.h2(jk,:) = jackknife.h2(jk,:) + sum(perSNPh2_jk .* annot_unnormalized{block});
         end
     end
