@@ -1,4 +1,4 @@
-function [J] = GWASlikelihoodHessian(Z, sigmasq, P, nn, delSigmaDelA, whichSNPs, intercept, fixedIntercept)
+function [J, nodeHess] = GWASlikelihoodHessian(Z, sigmasq, P, nn, delSigmaDelA, whichSNPs, intercept, fixedIntercept)
 % GWASlikelihoodHessian computes the Hessian of the likelihood of the GWAS 
 % sumstats alphaHat under a gaussian model:
 %                   beta ~ MVN(0,diag(sigmasq))
@@ -31,6 +31,10 @@ function [J] = GWASlikelihoodHessian(Z, sigmasq, P, nn, delSigmaDelA, whichSNPs,
 assert(isscalar(intercept) && all(intercept>=0,'all'))
 
 if iscell(P) % handle cell-array-valued inputs
+    if nargout > 1
+        error('Currently does not support two output arguments for cellarray inputs')
+    end
+    
     if nargin < 6
         whichSNPs = cellfun(@(x)true(size(x),Z),'UniformOutput', false);
     end
@@ -70,6 +74,13 @@ else
     % approximate Hessian
     J = -1/2 * b_scaled' * precisionDivide(M, b_scaled, whichSNPs);
     
+    % obtain the node-speciic values
+    if nargout > 1
+        Minv = sparseinv(M);
+        MinvDiag = diag(Minv);
+        nodeHess = -1/2 * nn^2 * (MinvDiag(whichSNPs) .* (b.^2));
+    end
+
     % missing SNPs extra term
     if ~fixedIntercept
         mm0 = sum(~whichSNPs);
