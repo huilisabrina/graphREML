@@ -137,6 +137,9 @@ for k=1:numel(fields)
     eval(line);
 end
 
+assert(all(cellfun(@(x)all(x(:,1) == 1), annot)), ...
+    'First column of annotations matrix is required to be all ones')
+
 % throw out LD blocks with a chisq statistic greater than threshold, or
 % empty
 emptyblocks = cellfun(@isempty,Z);
@@ -208,7 +211,6 @@ end
 smallNumber = 1e-6;
 
 noParams = length(params) - 1 + fixedIntercept;
-annot_unnormalized = annot;
 
 if normalizeAnnot
     annot = cellfun(@(a){mm*a./max(1,annotSum)},annot);
@@ -233,7 +235,7 @@ sampleSize = sampleSize;
 fixedIntercept = fixedIntercept;
 intercept = intercept;
 noSamples = noSamples;
-nullFit = nullFit; %%  
+nullFit = nullFit;
 allSteps=zeros(min(maxReps,1e6),noParams+1-fixedIntercept);
 allValues=zeros(min(maxReps,1e6),1);
 allGradients=allSteps;
@@ -565,7 +567,8 @@ end
 h2Est = 0;
 for block=1:noBlocks
     perSNPh2 = linkFn(annot{block}(:,1:noParamsInit), params(1:noParamsInit));
-    h2Est = h2Est + sum(perSNPh2.*annot_unnormalized{block});
+    annot_unnormalized = annot{block} .* max(1,annotSum);
+    h2Est = h2Est + sum(perSNPh2.*annot_unnormalized);
 end
 
 % h2 estimates for each leave-one-out subset of the data
@@ -577,7 +580,8 @@ if nargout >= 5
         for jk = 1:length(keep_blocks)
             perSNPh2_jk = linkFn(annot{block}(:,1:noParamsInit), ...
                 jackknife.params(jk, 1:noParamsInit)');
-            jackknife.h2(jk,:) = jackknife.h2(jk,:) + sum(perSNPh2_jk .* annot_unnormalized{block});
+            annot_unnormalized = annot{block} .* max(1,annotSum);
+            jackknife.h2(jk,:) = jackknife.h2(jk,:) + sum(perSNPh2_jk .* annot_unnormalized);
         end
     end
 
@@ -593,11 +597,8 @@ estimate.params = params;
 estimate.h2 = h2Est;
 estimate.annotSum = annotSum;
 estimate.logLikelihood = -newObjVal;
+estimate.enrichment = (h2Est./annotSum) / (h2Est(1)/annotSum(1));
 
-% Enrichment only calculated if first annotation is all-ones vector
-if all(cellfun(@(a)all(a(:,1)==1),annot_unnormalized))
-    estimate.enrichment = (h2Est./annotSum) / (h2Est(1)/annotSum(1));
-end
 
 %% Compute covariance of the parameter estimates
 % Approximate fisher information (AI)
