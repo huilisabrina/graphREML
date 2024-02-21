@@ -140,6 +140,11 @@ end
 assert(all(cellfun(@(x)all(x(:,1) == 1), annot)), ...
     'First column of annotations matrix is required to be all ones')
 
+if isempty(params)
+    noAnnot = size(annot{1},2);
+    params = zeros(noAnnot,1); 
+end
+
 % throw out LD blocks with a chisq statistic greater than threshold, or
 % empty
 emptyblocks = cellfun(@isempty,Z);
@@ -174,7 +179,7 @@ if strcmpi(largeEffectBehavior,'annotateSNP')
             annot{block}(:,end+1) = a;
         end
         if ~isempty(params)
-            params(end+1) = linkFnInv(chisqThreshold);
+            params(end+1) = linkFnInv(chisqThreshold / sampleSize);
         end
     end
 elseif strcmpi(largeEffectBehavior,'annotateBlock')
@@ -188,7 +193,7 @@ elseif strcmpi(largeEffectBehavior,'annotateBlock')
             annot{block}(:,end+1) = a;
         end
         if ~isempty(params)
-            params(end+1) = linkFnInv(chisqThreshold/(mm/noBlocks));
+            params(end+1) = linkFnInv(chisqThreshold/(mm/noBlocks)/sampleSize);
         end
     end
 else
@@ -202,11 +207,9 @@ noAnnot = size(annot{1},2);
 annotSum = cellfun(@(x){sum(x,1)},annot);
 annotSum = sum(vertcat(annotSum{:}));
 noBlocks = length(annot);
-if isempty(params)
-    params = zeros(noAnnot,1);
-    if ~fixedIntercept
-        params(end+1,1) = 1;
-    end
+
+if ~fixedIntercept
+    params(end+1,1) = 1;
 end
 smallNumber = 1e-6;
 
@@ -565,14 +568,18 @@ end
 
 % From paramaters to h2 estimates
 h2Est = 0;
+h2IncludeLargeEffects = 0;
 for block=1:noBlocks
     perSNPh2 = linkFn(annot{block}(:,1:noParamsInit), params(1:noParamsInit));
+    perSNPh2IncludeLargeEffects = linkFn(annot{block}(:,1:noParams), params(1:noParams));
     if normalizeAnnot
         annot_unnormalized = annot{block} .* max(1,annotSum);
     else
         annot_unnormalized = annot{block};
     end
     h2Est = h2Est + sum(perSNPh2.*annot_unnormalized);
+    h2IncludeLargeEffects = h2IncludeLargeEffects + ...
+        sum(perSNPh2IncludeLargeEffects.*annot_unnormalized);
 end
 
 % h2 estimates for each leave-one-out subset of the data
@@ -603,6 +610,7 @@ end
 
 estimate.params = params;
 estimate.h2 = h2Est;
+estimate.h2IncludeLargeEffects = h2IncludeLargeEffects;
 estimate.annotSum = annotSum;
 estimate.logLikelihood = -newObjVal;
 estimate.enrichment = (h2Est./annotSum) / (h2Est(1)/annotSum(1));
