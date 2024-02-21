@@ -567,7 +567,11 @@ end
 h2Est = 0;
 for block=1:noBlocks
     perSNPh2 = linkFn(annot{block}(:,1:noParamsInit), params(1:noParamsInit));
-    annot_unnormalized = annot{block} .* max(1,annotSum);
+    if normalize_annot
+        annot_unnormalized = annot{block} .* max(1,annotSum);
+    else
+        annot_unnormalized = annot{block};
+    end
     h2Est = h2Est + sum(perSNPh2.*annot_unnormalized);
 end
 
@@ -580,7 +584,11 @@ if nargout >= 5
         for jk = 1:length(keep_blocks)
             perSNPh2_jk = linkFn(annot{block}(:,1:noParamsInit), ...
                 jackknife.params(jk, 1:noParamsInit)');
-            annot_unnormalized = annot{block} .* max(1,annotSum);
+            if normalize_annot
+                annot_unnormalized = annot{block} .* max(1,annotSum);
+            else
+                annot_unnormalized = annot{block};
+            end
             jackknife.h2(jk,:) = jackknife.h2(jk,:) + sum(perSNPh2_jk .* annot_unnormalized);
         end
     end
