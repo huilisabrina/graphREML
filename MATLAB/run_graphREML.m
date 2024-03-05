@@ -104,7 +104,7 @@ addOptional(p, 'annot', cellfun(@(x){true(size(x))},Z), @(x)size(x,1)==mm || isc
 addOptional(p, 'linkFn', @(a,x)log(1+exp(a*x))/mm, @(f)isa(f,'function_handle'))
 addOptional(p, 'linkFnGrad', @(a,x)exp(a*x).*a./(1+exp(a*x))/mm, @(f)isa(f,'function_handle'))
 addOptional(p, 'linkFn2Grad', @(a,x)exp(a*x).*a.*a./(1+exp(a*x))./(1+exp(a*x))/mm, @(f)isa(f,'function_handle'))
-addOptional(p, 'linkFnInv', @(h2snp)log(exp(h2snp*mm)-1) , @(f)isa(f,'function_handle'))
+addOptional(p, 'linkFnInv', @(h2snp) h2snp*mm + log(1-1/exp(h2snp*mm)) , @(f)isa(f,'function_handle'))
 addOptional(p, 'params', [], @isvector)
 addOptional(p, 'fixedIntercept', true, @isscalar)
 addOptional(p, 'intercept', 1, @isscalar)
