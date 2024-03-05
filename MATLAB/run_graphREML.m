@@ -140,8 +140,8 @@ end
 assert(all(cellfun(@(x)all(x(:,1) == 1), annot)), ...
     'First column of annotations matrix is required to be all ones')
 
+noAnnot = size(annot{1},2);
 if isempty(params)
-    noAnnot = size(annot{1},2);
     params = zeros(noAnnot,1); 
 end
 
@@ -150,6 +150,12 @@ end
 emptyblocks = cellfun(@isempty,Z);
 maxChisq = inf * ones(size(Z));
 maxChisq(~emptyblocks) = cellfun(@(x)max(x.^2), Z(~emptyblocks));
+
+if isinf(chisqThreshold)
+    chisqThreshold = max(sampleSize*0.001, 80)
+    disp("Applying the default chisq threshold -- max between 80 and 0.001 of the sample size")
+end
+
 if strcmp(largeEffectBehavior,'discard')
     keep_blocks = maxChisq < chisqThreshold;
 else
@@ -203,6 +209,12 @@ end
 
 
 blocksize = cellfun(@length, Z);
+% record the new annotation (for large effects)
+if size(annot{1},2) > noAnnot
+    newAnnot = cellfun(@(a)a(:,end), annot, 'UniformOutput',false);
+else
+    newAnnot = {};
+end
 noAnnot = size(annot{1},2);
 annotSum = cellfun(@(x){sum(x,1)},annot);
 annotSum = sum(vertcat(annotSum{:}));
@@ -472,6 +484,7 @@ for rep=1:maxReps
                 if printStuff
                     disp('Updated parameter values:')
                     disp(params(1:5)')
+                    disp(params(end-5,:end)')
                 end
             end
         else
@@ -715,6 +728,8 @@ estimate.enrichjkPval = jk_pval;
 estimate.coefPval = compute_pval(params, naiveVar);
 estimate.coefsandPval = compute_pval(params, sandVar);
 estimate.coefjkPval = compute_pval(params, jkVar);
+estimate.largeEffectAnnot = newAnnot;
+
 
 %% Record variance-covariance matrices
 diagnostics.paramVar = naiveVar;
