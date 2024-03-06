@@ -656,6 +656,7 @@ J = sum(link_jacob, 1);
 dMdtau = 1/(G^2)*(G*link_jacob - kron(link_val, J));
 dMdtau_A = transpose(dMdtau) * annot_mat;
 p_annot = mean(annot_mat, 1)';
+p_annot_count = sum(annot_mat, 1)';
 
 if ~fixedIntercept
     estimate.intercept = params(end);
@@ -716,6 +717,7 @@ estimate.paramSE = sqrt(diag(naiveVar));
 estimate.paramSandSE = sqrt(diag(sandVar));
 estimate.paramJackSE = sqrt(diag(jkVar));
 estimate.p_annot = p_annot';
+estimate.p_annot_count = p_annot_count';
 estimate.SE = enrich_SE';
 estimate.sandSE = enrich_sandSE';
 estimate.jkSE = enrich_jkSE';
