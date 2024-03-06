@@ -484,7 +484,7 @@ for rep=1:maxReps
                 if printStuff
                     disp('Updated parameter values:')
                     disp(params(1:5)')
-                    disp(params(end-5,:end)')
+                    disp(params(end-5:end)')
                 end
             end
         else
