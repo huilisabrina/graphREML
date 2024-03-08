@@ -180,7 +180,8 @@ if strcmpi(largeEffectBehavior,'annotateSNP')
             a = zeros(size(annot{block},1),1);
             if maxChisq(block) > chisqThreshold
                 [~,leadSNP] = max(Z{block}.^2);
-                a(leadSNP) = 1;
+                [~, representatives] = unique(whichIndicesAnnot{block});
+                a(representatives(leadSNP)) = 1;
             end
             annot{block}(:,end+1) = a;
         end
