@@ -174,7 +174,22 @@ if any(~keep_blocks)
 end
 
 noParamsInit = length(params);
-if strcmpi(largeEffectBehavior,'annotateSNP')
+if strcmpi(largeEffectBehavior,'annotateSNP_linear')
+    if any(maxChisq > chisqThreshold)
+        for block = 1:noBlocks
+            a = zeros(size(annot{block},1),1);
+            if maxChisq(block) > chisqThreshold
+                [~,leadSNP] = max(Z{block}.^2);
+                [~, representatives] = unique(whichIndicesAnnot{block});
+                a(representatives(leadSNP)) = maxChisq(block)-chisqThreshold;
+            end
+            annot{block}(:,end+1) = a;
+        end
+        if ~isempty(params)
+            params(end+1) = 1 / linkFnGrad(1,0);
+        end
+    end
+elseif strcmpi(largeEffectBehavior,'annotateSNP')
     if any(maxChisq > chisqThreshold)
         for block = 1:noBlocks
             a = zeros(size(annot{block},1),1);
