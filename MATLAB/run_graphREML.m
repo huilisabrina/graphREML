@@ -643,6 +643,7 @@ estimate.h2IncludeLargeEffects = h2IncludeLargeEffects;
 estimate.annotSum = annotSum;
 estimate.logLikelihood = -newObjVal;
 estimate.enrichment = (h2Est./annotSum) / (h2Est(1)/annotSum(1));
+estimate.enrichmentIncludeLargeEffects = (h2IncludeLargeEffects./annotSum) / (h2IncludeLargeEffects(1)/annotSum(1));
 
 
 %% Compute covariance of the parameter estimates
