@@ -11,6 +11,7 @@
 # 2) jackknifed estimates (*_paramsJK.txt)
 # 3) estimates table (*_est.txt)
 
+
 #-------------------------------------------------------
 import os, sys, re
 import logging, time, traceback
@@ -73,11 +74,11 @@ parser.add_argument('--snpGrad_fp', default=None, type=str,
 parser.add_argument('--annot_fp', default=None, type=str, 
     help='File path to the variant-level annotation matrix for a set of annotations.')
 parser.add_argument('--output_fp', default=None, type=str, 
-    help='Output prefix name. Unless otherwise specified, a single test output will be produced for all of the annotations specified.')
+    help='Output prefix name. Unless otherwise specified, a single output table will be produced for all of the annotations specified.')
 parser.add_argument('--annotations', default=None, type=str, 
     help='The set of annotations to run score test on, specified as a string, separated by comma.')
 parser.add_argument('--adjust_score', default=False, action="store_true", help='Whether or not to acccount for the uncertainty in the estimates of parameters.')
-parser.add_argument('--joint_test', default=False, action="store_true", help='Whether or not to joint test the new annotations, as opposed to performing marginal tests for each new annot.')
+parser.add_argument('--joint_test', default=False, action="store_true", help='Whether or not to perform a joint test on all of the new annotations, as opposed to performing marginal tests for each new annot.')
 parser.add_argument('--stream-stdout', default=False, action="store_true", help='Stream log information on console in addition to writing to log file.')
 
 
@@ -96,6 +97,7 @@ if __name__ == '__main__':
 
         # remove large effect from the score test, if present
         if 'largeEffect' in list(df_est['annotName'].values):
+            logging.info("Large effect sizes were accounted for in estimation. Removing it from the score test.")
             null_est = df_est['params'].values[:-1]
             annot_null_list = [x for x in list(df_est['annotName'].values) if x not in ['largeEffect']]
             jk_annot = pd.read_csv(args.jackknife_fp, delim_whitespace = False, sep=',', index_col = None).values[:-1]
@@ -104,7 +106,7 @@ if __name__ == '__main__':
             annot_null_list = list(df_est['annotName'].values)
             jk_annot = pd.read_csv(args.jackknife_fp, delim_whitespace = False, sep=',', index_col = None).values
 
-        logging.info("Null annot")
+        logging.info("Annotations included in the null fit")
         logging.info(annot_null_list)
         
         # noBlocks = df_jackknife.shape[2]
@@ -115,12 +117,10 @@ if __name__ == '__main__':
         df_snp = pd.read_csv(args.snpGrad_fp, delim_whitespace = False, sep=',',index_col = None)
 
         if args.adjust_score:
+            logging.info("Estimation uncertainty was accounted for in the null model fit")
             df_snp.columns = ['perSNPh2', 'snpGrad', 'snpHess', 'block', 'rsID']
         else:
             df_snp.columns = ['perSNPh2', 'snpGrad', 'block', 'rsID']
-
-        logging.info(df_snp.shape)
-        logging.info(df_snp.head(5))
 
         logging.info("Reading the merged annotation files (all annotations)")
         df_annot = pd.read_csv(args.annot_fp, delim_whitespace = False, sep=',', index_col = None)
@@ -129,31 +129,24 @@ if __name__ == '__main__':
 
         # list the annotations to be tested
         annot_test_list = args.annotations.split(',')
-        # annot_test_list = ['Conserved_LindbladToh_common', 'Conserved_LindbladToh_flanking_500_common', 'Repressed_Hoffman_common', 'Repressed_Hoffman_flanking_500_common']
-        
+
         # extract the original annotations (null annot)
         null_annot = df_annot[annot_null_list].values
         
-        # merge SNP-specific scores with annotation (may be mismatched)
+        # merge SNP-specific scores with annotation
         if args.adjust_score:
             df_merged = df_snp[['rsID', 'snpGrad', 'snpHess', 'block']].merge(df_annot[['rsID'] + annot_test_list], on = 'rsID', how = 'inner')
         else:
             df_merged = df_snp[['rsID', 'snpGrad', 'block']].merge(df_annot[['rsID'] + annot_test_list], on = 'rsID', how = 'inner')
-        logging.info(df_merged.columns)
-        logging.info(df_merged.shape)
 
-        # project out the null annotations
-        proj_out_list = annot_null_list # if x not in ['Coding_UCSC_flanking_500_common', 'Conserved_LindbladToh_flanking_500_common']
+        # project out the null annotations (adjust the score)
+        proj_out_list = annot_null_list
         proj_annot = df_annot[proj_out_list].values
         mlr_fit = sm.OLS(df_merged['snpGrad'].values, proj_annot).fit()
         pred = mlr_fit.predict()
         resid = mlr_fit.resid
         df_merged['snpGrad_proj'] = resid
         
-        logging.info(df_merged[['snpGrad', 'snpGrad_proj']].head(5))
-        logging.info(np.mean(df_merged['snpGrad_proj'].values))
-        logging.info(np.median(df_merged['snpGrad_proj'].values))
-
         #==================================
         # Test of single annotations
         #==================================
@@ -189,7 +182,7 @@ if __name__ == '__main__':
                 snpGrad = df_merged.loc[df_merged['block'] == i+1, 'snpGrad_proj'].values
                 annot_vec = df_merged.loc[df_merged['block'] == i+1, annot_test_list[k]].values
 
-                # deduct score contributed from one LD block
+                # deduct the score contributed from one LD block
                 blockScore[i] = sumscore - np.nansum(np.multiply(snpGrad, annot_vec), axis = 0)
 
                 if args.adjust_score:
@@ -225,8 +218,6 @@ if __name__ == '__main__':
         df_score_test = pd.DataFrame({'annot': annot_test_list, 'chisq_stat': chisq_list, 'chisq_pval': chisq_pval_list})
         logging.info(df_score_test)
         df_score_test.to_csv(args.output_fp + ".txt", index=False, header=True, sep='\t')
-
-        exit()
 
         if args.joint_test:
             #====================================
