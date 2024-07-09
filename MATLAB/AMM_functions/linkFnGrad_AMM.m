@@ -1,4 +1,11 @@
 function [sigmasqGrad] = linkFnGrad_AMM(annot,theta,nbaseline,Nsnp)
+    % annot = annot matrix that includes both the baseline annot and the AMM annot
+    % theta = vector of parameters
+    % nbaseline = number of baseline annotations
+    % Nsnp = total number of SNPs 
+
+    % Note: the annotation matrix should have baseline annot BEFORE the AMM annotations
+
 
     % Generate indices to separate out baseline annot from AMM annot
     idxbaseline = logical([ones(1,nbaseline), zeros(1, (size(theta,1)-nbaseline))]');
@@ -29,6 +36,7 @@ function [sigmasqGrad] = linkFnGrad_AMM(annot,theta,nbaseline,Nsnp)
     sigmasqGrad(:, idxAMM) = g_baseline .* annot(:, idxAMM) .* grad_fP';
     % disp(size(grad_fP))
 
+    % % util functions
     function y = g(x)
         y = x + log(1 + exp(-x));
         y(x < 0) = log(1 + exp(x(x < 0)));
