@@ -1,6 +1,0 @@
-function [linkFn,linkFnGrad] = AMM_link_functions()
-
-linkFn = @(annot, theta) exp(theta(1)) + exp(theta(2)) .* dot(exp(theta(3:end)), annot(:,2:end)) ;
-linkFnGrad = @(annot, theta) [exp(theta(1)), ...
-    exp(theta(2)) .* dot(exp(theta(3:end)), annot(:,2:end)),...
-    exp(theta(2)) .* exp(theta(3:end)) .* annot(:,2:end)];
