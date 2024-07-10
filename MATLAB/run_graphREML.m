@@ -744,9 +744,9 @@ estimate.h2jkSE = jkSE_h2';
 estimate.enrichPval = naive_pval;
 estimate.enrichsandPval = sand_pval;
 estimate.enrichjkPval = jk_pval;
-estimate.coefPval = compute_pval(params, naiveVar);
-estimate.coefsandPval = compute_pval(params, sandVar);
-estimate.coefjkPval = compute_pval(params, jkVar);
+estimate.coefPval = twoTailNormPval(params, naiveVar);
+estimate.coefsandPval = twoTailNormPval(params, sandVar);
+estimate.coefjkPval = twoTailNormPval(params, jkVar);
 estimate.largeEffectAnnot = newAnnot;
 
 
