@@ -1,6 +1,6 @@
 function [linkFn, linkFnGrad] = gen_linkFns(noSNPs)
     
-    linkFn = @(annot, theta) (annot*theta + log(1 + exp(-annot*theta))) / noSNPs;
+    linkFn = @(annot, theta) softmax_robust(annot*theta) / noSNPs;
     linkFnGrad = @(a, t)g(a, t, noSNPs);
 
     function y = g(annot, theta, noSNPs)
