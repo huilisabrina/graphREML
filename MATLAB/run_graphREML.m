@@ -126,6 +126,7 @@ addOptional(p, 'chisqThreshold', inf, @isscalar)
 addOptional(p, 'largeEffectBehavior', 'keep', @ischar)
 addOptional(p, 'normalizeAnnot', false, @isscalar)
 addOptional(p, 'nullFit', false, @isscalar)
+addOptional(p, 'hyperParamOffset', 0, @isscalar)
 
 parse(p, Z, P, varargin{:});
 noBlocks = length(P);
@@ -141,6 +142,7 @@ assert(all(cellfun(@(x)all(x(:,1) == 1), annot)), ...
     'First column of annotations matrix is required to be all ones')
 
 noAnnot = size(annot{1},2);
+
 if isempty(params)
     params = zeros(noAnnot,1); 
 end
@@ -153,7 +155,6 @@ maxChisq(~emptyblocks) = cellfun(@(x)max(x.^2), Z(~emptyblocks));
 
 if isinf(chisqThreshold)
     chisqThreshold = max(sampleSize*0.001, 80)
-    disp("Applying the default chisq threshold -- max between 80 and 0.001 of the sample size")
 end
 
 if strcmp(largeEffectBehavior,'discard')
@@ -173,7 +174,8 @@ if any(~keep_blocks)
     annot = annot(keep_blocks);
 end
 
-noParamsInit = length(params);
+noParamsInit = length(params); % for large effects; to be distinguished from noParams
+
 if strcmpi(largeEffectBehavior,'annotateSNP_linear')
     if any(maxChisq > chisqThreshold)
         for block = 1:noBlocks
@@ -186,7 +188,8 @@ if strcmpi(largeEffectBehavior,'annotateSNP_linear')
             annot{block}(:,end+1) = a;
         end
         if ~isempty(params)
-            params(end+1) = 1 / linkFnGrad(1,0);
+            % params(end+1) = 1 / linkFnGrad(1,0);
+            params(end+1) = linkFnInv(chisqThreshold / sampleSize);
         end
     end
 elseif strcmpi(largeEffectBehavior,'annotateSNP')
@@ -227,6 +230,7 @@ end
 blocksize = cellfun(@length, Z);
 % record the new annotation (for large effects)
 if size(annot{1},2) > noAnnot
+    disp("Adding new annotation for large effects")
     newAnnot = cellfun(@(a)a(:,end), annot, 'UniformOutput',false);
 else
     newAnnot = {};
@@ -255,7 +259,7 @@ if noSamples > 0
     samples = arrayfun(@(m)randn(m,noSamples),blocksize,'UniformOutput',false);
     samples = cellfun(@(x)x./sqrt(sum(x.^2,2)),samples,'UniformOutput',false);
 else
-    samples = cell(noBlocks,1); % needed for parfor
+    samples = cell(noBlocks,1); % needed for for
 end
 
 % needed for parfor
@@ -346,6 +350,7 @@ for rep=1:maxReps
             sigmasqGrad(:,kk) = accumarray(whichSumstatsAnnot{block}, sg(:,kk));
         end
         
+
         % Hessian of the log-likelihood
         hessian = hessian + ...
             GWASlikelihoodHessian(Z{block},sigmasq,P{block},...
@@ -403,21 +408,39 @@ for rep=1:maxReps
             hess_mod = hess_mod + 1e-2 * trustRegionLam *...
                 mean(diag(hessian)) / mean(abs(gradient)) * diag(abs(gradient)) + ...
                 eps * eye(size(hess_mod));
-            
-            stepSize = hess_mod \ gradient;
 
-            if printStuff; disp('Newly proposed step size:'); end
+            % apply Newton Raphson only to the main parameters
+            stepSize = hess_mod \ gradient;
+            % stepSize = hess_mod(1:end-hyperParamOffset, 1:end-hyperParamOffset) \ gradient(1:end-hyperParamOffset);
+            % stepSizeHyper = hess_mod(end-hyperParamOffset+1:end, end-hyperParamOffset+1:end) \ gradient(end-hyperParamOffset+1:end);
+            % stepSize = vertcat(stepSize, stepSizeHyper);
+
+            % % debugging
+            % if printStuff
+            %     disp('Hessian matrix')
+            %     disp(hess_mod)
+            %     disp('Gradient value')
+            %     disp(gradient)
+            %     disp('Newly proposed step size:')
+            %     disp(stepSize)
+            % end
 
             % Assess the proposed step -- eval likelihood (and gradient if
             % specified) at the new values of parameter
             params_propose = oldParams - stepSize;
             newObjVal_propose = objFn(params_propose);
+            if printStuff
+                disp('Newly proposed parameter values')
+                disp(params_propose)
+                disp('Newly proposed objective function value')
+                disp(newObjVal_propose)
+            end
 
             if deltaGradCheck
                 gradient_propose = 0;
                 for block = 1:noBlocks
                     sigmasq = linkFn(annot{block}, params_propose(1:noParams));
-                    sigmasqGrad = linkFnGrad(annot{block}, params_propose(1:noParams)) .* annot{block};
+                    sigmasqGrad = linkFnGrad(annot{block}, params_propose(1:noParams));
 
                     if noSamples > 0
                         gradient_propose = gradient_propose + ...
@@ -434,6 +457,13 @@ for rep=1:maxReps
             % Evaluate the proposed step size
             delta_actual = newObjVal_propose - newObjVal;
             delta_pred = delta_pred_ll(stepSize);
+            if printStuff
+                disp('Actual change of objective value')
+                disp(delta_actual)
+                disp('Predicted change of objective value')
+                disp(delta_pred)
+            end
+
 
             % Assess the quality of the step
             if delta_actual > 0
@@ -499,14 +529,13 @@ for rep=1:maxReps
                 params = params_propose;
                 if printStuff
                     disp('Updated parameter values:')
-                    disp(params(1:5)')
-                    disp(params(end-5:end)')
+                    disp(params)
                 end
             end
         else
             if printStuff
                 disp('Updated parameter values:')
-                disp(params(1:5)')
+                disp(params)
             end
         end
 
@@ -544,7 +573,9 @@ parfor block = 1:noBlocks
 
     sg = linkFnGrad(annot{block}, params(1:noParams));
     sigmasqGrad = zeros(length(sigmasq), noParams);
-    sh = linkFn2Grad(annot{block}, params(1:noParams));
+
+    if nullFit
+        sh = linkFn2Grad(annot{block}, params(1:noParams));
 
     for kk=1:noParams
         sigmasqGrad(:,kk) = accumarray(whichSumstatsAnnot{block}, sg(:,kk));
@@ -579,71 +610,76 @@ hessian = sum(hess_blocks,3);
 grad = sum(grad_blocks,1);
 psudojackknife = zeros(noBlocks, noParams + 0^fixedIntercept);
 for block = 1:noBlocks
-    psudojackknife(block,:) = params + ( hessian - hess_blocks(:,:,block) + 1e-12*eye(size(hessian))) \ (grad_blocks(block,:) - grad)';
+    psudojackknife(block,:) = params + (hessian - hess_blocks(:,:,block) + 1e-12*eye(size(hessian))) \ (grad_blocks(block,:) - grad)';
 end
 
 % Convergence report
-if nargout > 1
-    steps.reps = rep;
-    steps.params = allSteps(1:rep,:);
-    steps.obj = allValues(1:rep);
-    steps.gradient = allGradients(1:rep,:);
-    if length(timeMain) < rep
-        timeMain(rep) = Inf;
-    end
-    steps.timeParFor = timeMain;
-    steps.timeStepSize = timeTR;
+% if nargout > 1
+steps.reps = rep;
+steps.params = allSteps(1:rep,:);
+steps.obj = allValues(1:rep);
+steps.gradient = allGradients(1:rep,:);
+if length(timeMain) < rep
+    timeMain(rep) = Inf;
 end
+steps.timeParFor = timeMain;
+steps.timeStepSize = timeTR;
+% end
 
 % From paramaters to h2 estimates
 h2Est = 0;
-h2IncludeLargeEffects = 0;
+% h2IncludeLargeEffects = 0;
 for block=1:noBlocks
-    perSNPh2 = linkFn(annot{block}(:,1:noParamsInit), params(1:noParamsInit));
-    perSNPh2IncludeLargeEffects = linkFn(annot{block}(:,1:noParams), params(1:noParams));
+    % perSNPh2 = linkFn(annot{block}(:,1:noParamsInit), params(1:noParamsInit));
+    perSNPh2 = linkFn(annot{block}, params(1:noParamsInit));
+    % perSNPh2IncludeLargeEffects = linkFn(annot{block}(:,1:noParams), params(1:noParams));
     if normalizeAnnot
         annot_unnormalized = annot{block} .* max(1,annotSum);
     else
         annot_unnormalized = annot{block};
     end
     h2Est = h2Est + sum(perSNPh2.*annot_unnormalized);
-    h2IncludeLargeEffects = h2IncludeLargeEffects + ...
-        sum(perSNPh2IncludeLargeEffects.*annot_unnormalized);
+    % h2IncludeLargeEffects = h2IncludeLargeEffects + ...
+        % sum(perSNPh2IncludeLargeEffects.*annot_unnormalized);
 end
 
 % h2 estimates for each leave-one-out subset of the data
-if nargout >= 5
-    jackknife.params = repmat(params',length(keep_blocks),1);
-    jackknife.params(keep_blocks,:) = psudojackknife;
-    jackknife.h2 = zeros(size(jackknife.params));
-    for block = 1:noBlocks
-        for jk = 1:length(keep_blocks)
-            perSNPh2_jk = linkFn(annot{block}(:,1:noParamsInit), ...
-                jackknife.params(jk, 1:noParamsInit)');
-            if normalizeAnnot
-                annot_unnormalized = annot{block} .* max(1,annotSum);
-            else
-                annot_unnormalized = annot{block};
-            end
-            jackknife.h2(jk,:) = jackknife.h2(jk,:) + sum(perSNPh2_jk .* annot_unnormalized);
-        end
-    end
+% if nargout >= 5
+jackknife.params = repmat(params',length(keep_blocks),1);
+jackknife.params(keep_blocks,:) = psudojackknife;
+jackknife.h2 = zeros(size(jackknife.params)); 
+% jackknife.h2 = jackknife.h2(:,1:end-hyperParamOffset);
 
-    if nullFit
-        jackknife.score = cell(size(keep_blocks));
-        jackknife.score(keep_blocks) = snpGrad;
-        jackknife.hess = cell(size(keep_blocks));
-        jackknife.hess(keep_blocks) = snpHess;
+for block = 1:noBlocks
+    for jk = 1:length(keep_blocks)
+        % perSNPh2_jk = linkFn(annot{block}(:,1:noParamsInit), ...
+            % jackknife.params(jk, 1:noParamsInit)');
+        perSNPh2_jk = linkFn(annot{block}, ...
+                jackknife.params(jk, 1:noParamsInit)');
+        if normalizeAnnot
+            annot_unnormalized = annot{block} .* max(1,annotSum);
+        else
+            annot_unnormalized = annot{block};
+        end
+        jackknife.h2(jk,(1:noParams)) = jackknife.h2(jk,(1:noParams)) + sum(perSNPh2_jk .* annot_unnormalized);
     end
 end
 
+if nullFit
+    jackknife.score = cell(size(keep_blocks));
+    jackknife.score(keep_blocks) = snpGrad;
+    jackknife.hess = cell(size(keep_blocks));
+    jackknife.hess(keep_blocks) = snpHess;
+end
+% end
+
 estimate.params = params;
 estimate.h2 = h2Est;
-estimate.h2IncludeLargeEffects = h2IncludeLargeEffects;
+% estimate.h2IncludeLargeEffects = h2IncludeLargeEffects;
 estimate.annotSum = annotSum;
 estimate.logLikelihood = -newObjVal;
 estimate.enrichment = (h2Est./annotSum) / (h2Est(1)/annotSum(1));
-estimate.enrichmentIncludeLargeEffects = (h2IncludeLargeEffects./annotSum) / (h2IncludeLargeEffects(1)/annotSum(1));
+% estimate.enrichmentIncludeLargeEffects = (h2IncludeLargeEffects./annotSum) / (h2IncludeLargeEffects(1)/annotSum(1));
 
 
 %% Compute covariance of the parameter estimates
@@ -665,7 +701,7 @@ jkVar = cov(psudojackknife) * (noBlocks-2);
 % Turn annotation and coefficients to genetic variances
 annot_mat = vertcat(annot{:});
 link_val = linkFn(annot_mat, params(1:noParams));
-link_jacob = linkFnGrad(annot_mat, params(1:noParams)) .* annot_mat;
+link_jacob = linkFnGrad(annot_mat, params(1:noParams));
 G = sum(link_val);
 J = sum(link_jacob, 1);
 
@@ -690,17 +726,17 @@ end
 
 % naive SE estimator
 SE_prop_h2 = sqrt(diag(transpose(dMdtau_A)*(naiveVar*dMdtau_A)));
-enrich_SE = SE_prop_h2(1:noParams) ./ p_annot(1:noParams);
+enrich_SE = SE_prop_h2 ./ p_annot;
 enrich_SE(1) = sqrt(J*(naiveVar*transpose(J)));
 
 % robust / Huber-White estimator
 sandSE_prop_h2 = sqrt(diag(transpose(dMdtau_A)*(sandVar*dMdtau_A)));
-enrich_sandSE = sandSE_prop_h2(1:noParams) ./ p_annot(1:noParams);
+enrich_sandSE = sandSE_prop_h2 ./ p_annot;
 enrich_sandSE(1) = sqrt(J*(sandVar*transpose(J)));
 
 % jackknife estimator
 jkSE_prop_h2 = sqrt(diag(transpose(dMdtau_A)*(jkVar*dMdtau_A)));
-enrich_jkSE = jkSE_prop_h2(1:noParams) ./ p_annot(1:noParams);
+enrich_jkSE = jkSE_prop_h2 ./ p_annot;
 enrich_jkSE(1) = sqrt(J*(jkVar*transpose(J)));
 
 %% Variance of annot-h2 via chain rule
@@ -730,23 +766,45 @@ sand_pval = enrichment_pval(estimate.h2, sandSE_h2, sand_cov, p_annot', 'refCol'
 jk_pval = enrichment_pval(estimate.h2, jkSE_h2, jk_cov, p_annot', 'refCol', refCol);
 
 %% Record estimates
+% SE on the parameter coefficients
 estimate.paramSE = sqrt(diag(naiveVar));
 estimate.paramSandSE = sqrt(diag(sandVar));
 estimate.paramJackSE = sqrt(diag(jkVar));
+
+% annotation size
 estimate.p_annot = p_annot';
+% estimate.p_annot = horzcat(p_annot', NaN(1, hyperParamOffset));
 estimate.p_annot_count = p_annot_count';
+% estimate.p_annot_count = horzcat(p_annot_count', NaN(1, hyperParamOffset));
+
+% SE on the enrichment estimates
 estimate.SE = enrich_SE';
+% estimate.SE = horzcat(enrich_SE', NaN(1, hyperParamOffset));
 estimate.sandSE = enrich_sandSE';
+% estimate.sandSE = horzcat(enrich_sandSE', NaN(1, hyperParamOffset));
 estimate.jkSE = enrich_jkSE';
+% estimate.jkSE = horzcat(enrich_jkSE', NaN(1, hyperParamOffset));
+
+% SE on the h2 estimates
 estimate.h2SE = SE_h2';
+% estimate.h2SE = horzcat(SE_h2', NaN(1, hyperParamOffset));
 estimate.h2sandSE = sandSE_h2';
+% estimate.h2sandSE = horzcat(sandSE_h2', NaN(1, hyperParamOffset));
 estimate.h2jkSE = jkSE_h2';
+% estimate.h2jkSE = horzcat(jkSE_h2', NaN(1, hyperParamOffset));
+
+% pvalue of the enrichments
 estimate.enrichPval = naive_pval;
+% estimate.enrichPval = horzcat(naive_pval, NaN(1, hyperParamOffset));
 estimate.enrichsandPval = sand_pval;
+% estimate.enrichsandPval = horzcat(sand_pval, NaN(1, hyperParamOffset));
 estimate.enrichjkPval = jk_pval;
-estimate.coefPval = twoTailNormPval(params, naiveVar);
-estimate.coefsandPval = twoTailNormPval(params, sandVar);
-estimate.coefjkPval = twoTailNormPval(params, jkVar);
+% estimate.enrichjkPval = horzcat(jk_pval, NaN(1, hyperParamOffset));
+
+% pvalue of the parameter coefficients
+estimate.coefPval = twoTailNormPval(params(1:noParams), naiveVar);
+estimate.coefsandPval = twoTailNormPval(params(1:noParams), sandVar);
+estimate.coefjkPval = twoTailNormPval(params(1:noParams), jkVar);
 estimate.largeEffectAnnot = newAnnot;
 
 
