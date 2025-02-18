@@ -336,7 +336,7 @@ for rep=1:maxReps
     gradient = 0;
     hessian = 0;
     tic;
-    parfor block = 1:noBlocks
+    for block = 1:noBlocks
         % Effect-size variance for each sumstats SNPs, adding
         % across annotation  SNPs
         sigmasq = accumarray(whichSumstatsAnnot{block}, ...
@@ -440,7 +440,7 @@ for rep=1:maxReps
                 gradient_propose = 0;
                 for block = 1:noBlocks
                     sigmasq = linkFn(annot{block}, params_propose(1:noParams));
-                    sigmasqGrad = linkFnGrad(annot{block}, params_propose(1:noParams));
+                    sigmasqGrad = linkFnGrad(annot{block}, params_propose(1:noParams)) .* annot{block};;
 
                     if noSamples > 0
                         gradient_propose = gradient_propose + ...
@@ -567,7 +567,7 @@ if nullFit
     snpHess = cell(noBlocks,1);
 end
 
-parfor block = 1:noBlocks
+for block = 1:noBlocks
     sigmasq = accumarray(whichSumstatsAnnot{block}, ...
         linkFn(annot{block}, params(1:noParams)));
 
@@ -701,7 +701,7 @@ jkVar = cov(psudojackknife) * (noBlocks-2);
 % Turn annotation and coefficients to genetic variances
 annot_mat = vertcat(annot{:});
 link_val = linkFn(annot_mat, params(1:noParams));
-link_jacob = linkFnGrad(annot_mat, params(1:noParams));
+link_jacob = linkFnGrad(annot_mat, params(1:noParams)) .* annot_mat;
 G = sum(link_val);
 J = sum(link_jacob, 1);
 
