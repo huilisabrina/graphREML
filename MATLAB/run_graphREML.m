@@ -127,6 +127,7 @@ addOptional(p, 'largeEffectBehavior', 'keep', @ischar)
 addOptional(p, 'normalizeAnnot', false, @isscalar)
 addOptional(p, 'nullFit', false, @isscalar)
 addOptional(p, 'hyperParamOffset', 0, @isscalar)
+addOptional(p, 'smallNumber', 1e-6, @isscalar)
 
 parse(p, Z, P, varargin{:});
 noBlocks = length(P);
@@ -138,6 +139,7 @@ for k=1:numel(fields)
     eval(line);
 end
 
+% base annotation is required
 assert(all(cellfun(@(x)all(x(:,1) == 1), annot)), ...
     'First column of annotations matrix is required to be all ones')
 
@@ -174,7 +176,7 @@ if any(~keep_blocks)
     annot = annot(keep_blocks);
 end
 
-noParamsInit = length(params); % for large effects; to be distinguished from noParams
+noParamsInit = length(params); % number of params excl. intercept and large effects
 
 if strcmpi(largeEffectBehavior,'annotateSNP_linear')
     if any(maxChisq > chisqThreshold)
@@ -227,24 +229,26 @@ else
 end
 
 
-blocksize = cellfun(@length, Z);
-% record the new annotation (for large effects)
+% for saving the large effect annot (at the end)
 if size(annot{1},2) > noAnnot
     disp("Adding new annotation for large effects")
     newAnnot = cellfun(@(a)a(:,end), annot, 'UniformOutput',false);
 else
     newAnnot = {};
 end
-noAnnot = size(annot{1},2);
+
+blocksize = cellfun(@length, Z);
+noAnnot = size(annot{1},2); % updated with large effects
 annotSum = cellfun(@(x){sum(x,1)},annot);
 annotSum = sum(vertcat(annotSum{:}));
 noBlocks = length(annot);
 
+% use the intercept value as initial value for free intercept estimation
 if ~fixedIntercept
-    params(end+1,1) = 1;
+    params(end+1,1) = intercept;
 end
-smallNumber = 1e-6;
 
+% does NOT include the intercept if it is NOT fixed
 noParams = length(params) - 1 + fixedIntercept;
 
 if normalizeAnnot
@@ -259,7 +263,7 @@ if noSamples > 0
     samples = arrayfun(@(m)randn(m,noSamples),blocksize,'UniformOutput',false);
     samples = cellfun(@(x)x./sqrt(sum(x.^2,2)),samples,'UniformOutput',false);
 else
-    samples = cell(noBlocks,1); % needed for for
+    samples = cell(noBlocks,1); % needed for parfor
 end
 
 % needed for parfor
@@ -271,6 +275,8 @@ fixedIntercept = fixedIntercept;
 intercept = intercept;
 noSamples = noSamples;
 nullFit = nullFit;
+
+% for logging
 allSteps=zeros(min(maxReps,1e6),noParams+1-fixedIntercept);
 allValues=zeros(min(maxReps,1e6),1);
 allGradients=allSteps;
@@ -350,7 +356,6 @@ for rep=1:maxReps
             sigmasqGrad(:,kk) = accumarray(whichSumstatsAnnot{block}, sg(:,kk));
         end
         
-
         % Hessian of the log-likelihood
         hessian = hessian + ...
             GWASlikelihoodHessian(Z{block},sigmasq,P{block},...
@@ -409,21 +414,12 @@ for rep=1:maxReps
                 mean(diag(hessian)) / mean(abs(gradient)) * diag(abs(gradient)) + ...
                 eps * eye(size(hess_mod));
 
-            % apply Newton Raphson only to the main parameters
             stepSize = hess_mod \ gradient;
+
+            % separate out updates for main params and hyperparams
             % stepSize = hess_mod(1:end-hyperParamOffset, 1:end-hyperParamOffset) \ gradient(1:end-hyperParamOffset);
             % stepSizeHyper = hess_mod(end-hyperParamOffset+1:end, end-hyperParamOffset+1:end) \ gradient(end-hyperParamOffset+1:end);
             % stepSize = vertcat(stepSize, stepSizeHyper);
-
-            % % debugging
-            % if printStuff
-            %     disp('Hessian matrix')
-            %     disp(hess_mod)
-            %     disp('Gradient value')
-            %     disp(gradient)
-            %     disp('Newly proposed step size:')
-            %     disp(stepSize)
-            % end
 
             % Assess the proposed step -- eval likelihood (and gradient if
             % specified) at the new values of parameter
@@ -440,7 +436,7 @@ for rep=1:maxReps
                 gradient_propose = 0;
                 for block = 1:noBlocks
                     sigmasq = linkFn(annot{block}, params_propose(1:noParams));
-                    sigmasqGrad = linkFnGrad(annot{block}, params_propose(1:noParams)) .* annot{block};;
+                    sigmasqGrad = linkFnGrad(annot{block}, params_propose(1:noParams));
 
                     if noSamples > 0
                         gradient_propose = gradient_propose + ...
@@ -463,7 +459,6 @@ for rep=1:maxReps
                 disp('Predicted change of objective value')
                 disp(delta_pred)
             end
-
 
             % Assess the quality of the step
             if delta_actual > 0
@@ -513,8 +508,8 @@ for rep=1:maxReps
             disp('History of rho for step size selection:')
             disp(rho_arr)
         end
-        % If adjustment is not successful, simply
-        % remove the gradient check and move on
+
+        % If adjustment is not successful
         if iter == maxiter
             % give warnings of the updating
             warning(['After attempts to adjust step size, ' ...
@@ -556,7 +551,6 @@ for rep=1:maxReps
     
 end
 
-
 %% Post-maximization computation
 % Compute block-specific gradient (once at the estimate)
 grad_blocks = zeros(noBlocks, noParams + 0^fixedIntercept);
@@ -567,7 +561,8 @@ if nullFit
     snpHess = cell(noBlocks,1);
 end
 
-for block = 1:noBlocks
+
+for block=1:noBlocks
     sigmasq = accumarray(whichSumstatsAnnot{block}, ...
         linkFn(annot{block}, params(1:noParams)));
 
@@ -576,6 +571,7 @@ for block = 1:noBlocks
 
     if nullFit
         sh = linkFn2Grad(annot{block}, params(1:noParams));
+    end
 
     for kk=1:noParams
         sigmasqGrad(:,kk) = accumarray(whichSumstatsAnnot{block}, sg(:,kk));
@@ -603,18 +599,18 @@ for block = 1:noBlocks
     else
         hess_blocks(:,:,block) = GWASlikelihoodHessian(Z{block},sigmasq,P{block},...
                     sampleSize, sigmasqGrad, whichIndicesSumstats{block}, intercept, fixedIntercept)';
-    end        
+    end   
 end
 
 hessian = sum(hess_blocks,3);
 grad = sum(grad_blocks,1);
 psudojackknife = zeros(noBlocks, noParams + 0^fixedIntercept);
+
 for block = 1:noBlocks
     psudojackknife(block,:) = params + (hessian - hess_blocks(:,:,block) + 1e-12*eye(size(hessian))) \ (grad_blocks(block,:) - grad)';
 end
 
 % Convergence report
-% if nargout > 1
 steps.reps = rep;
 steps.params = allSteps(1:rep,:);
 steps.obj = allValues(1:rep);
@@ -624,27 +620,21 @@ if length(timeMain) < rep
 end
 steps.timeParFor = timeMain;
 steps.timeStepSize = timeTR;
-% end
+
 
 % From paramaters to h2 estimates
 h2Est = 0;
-% h2IncludeLargeEffects = 0;
 for block=1:noBlocks
-    % perSNPh2 = linkFn(annot{block}(:,1:noParamsInit), params(1:noParamsInit));
     perSNPh2 = linkFn(annot{block}, params(1:noParamsInit));
-    % perSNPh2IncludeLargeEffects = linkFn(annot{block}(:,1:noParams), params(1:noParams));
     if normalizeAnnot
         annot_unnormalized = annot{block} .* max(1,annotSum);
     else
         annot_unnormalized = annot{block};
     end
     h2Est = h2Est + sum(perSNPh2.*annot_unnormalized);
-    % h2IncludeLargeEffects = h2IncludeLargeEffects + ...
-        % sum(perSNPh2IncludeLargeEffects.*annot_unnormalized);
 end
 
 % h2 estimates for each leave-one-out subset of the data
-% if nargout >= 5
 jackknife.params = repmat(params',length(keep_blocks),1);
 jackknife.params(keep_blocks,:) = psudojackknife;
 jackknife.h2 = zeros(size(jackknife.params)); 
@@ -652,8 +642,6 @@ jackknife.h2 = zeros(size(jackknife.params));
 
 for block = 1:noBlocks
     for jk = 1:length(keep_blocks)
-        % perSNPh2_jk = linkFn(annot{block}(:,1:noParamsInit), ...
-            % jackknife.params(jk, 1:noParamsInit)');
         perSNPh2_jk = linkFn(annot{block}, ...
                 jackknife.params(jk, 1:noParamsInit)');
         if normalizeAnnot
@@ -671,15 +659,12 @@ if nullFit
     jackknife.hess = cell(size(keep_blocks));
     jackknife.hess(keep_blocks) = snpHess;
 end
-% end
 
 estimate.params = params;
 estimate.h2 = h2Est;
-% estimate.h2IncludeLargeEffects = h2IncludeLargeEffects;
 estimate.annotSum = annotSum;
 estimate.logLikelihood = -newObjVal;
 estimate.enrichment = (h2Est./annotSum) / (h2Est(1)/annotSum(1));
-% estimate.enrichmentIncludeLargeEffects = (h2IncludeLargeEffects./annotSum) / (h2IncludeLargeEffects(1)/annotSum(1));
 
 
 %% Compute covariance of the parameter estimates
@@ -691,6 +676,7 @@ if any(diag(FI)==0)
         'Regularizing FI matrix to obtain standard errors.'])
     FI = FI + smallNumber*eye(size(FI));
 end
+
 naiveVar = pinv(FI);
 
 % Approximate empirical covariance of the score (using the block-wise estimates)
@@ -701,7 +687,7 @@ jkVar = cov(psudojackknife) * (noBlocks-2);
 % Turn annotation and coefficients to genetic variances
 annot_mat = vertcat(annot{:});
 link_val = linkFn(annot_mat, params(1:noParams));
-link_jacob = linkFnGrad(annot_mat, params(1:noParams)) .* annot_mat;
+link_jacob = linkFnGrad(annot_mat, params(1:noParams));
 G = sum(link_val);
 J = sum(link_jacob, 1);
 
@@ -753,7 +739,6 @@ sandSE_h2 = sqrt(diag(sand_cov));
 % jackknife estimator
 jk_cov = transpose(dMdtau_J)*(jkVar*dMdtau_J);
 jkSE_h2 = sqrt(diag(jk_cov));
-
 
 %% Compute p-values for enrichment (defined as difference)
 % based on naive SE
